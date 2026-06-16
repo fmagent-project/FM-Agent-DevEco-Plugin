@@ -2,12 +2,12 @@
     <id>com.fmagent.deveco.minimal</id>
     <name>FM Agent DevEco Minimal</name>
     <vendor>FM Agent</vendor>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
 
     <idea-version since-build="243" until-build="243.*"/>
 
     <description>
-        Minimal DevEco Studio plugin that shows project information from a HarmonyOS project.
+        DevEco Studio plugin that installs/runs FM-Agent and displays verification results.
     </description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -16,8 +16,8 @@
         <action
             id="com.fmagent.deveco.ShowProjectInfoAction"
             class="com.fmagent.deveco.ShowProjectInfoAction"
-            text="FM Agent: Show Project Info"
-            description="Show current DevEco project information">
+            text="FM Agent: Open Panel"
+            description="Open the FM-Agent runner panel">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
     </actions>

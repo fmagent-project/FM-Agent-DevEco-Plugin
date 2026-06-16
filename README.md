@@ -1,12 +1,15 @@
 # FM-Agent-DevEco-Plugin
 
-Minimal DevEco Studio plugin demo.
+DevEco Studio plugin demo for running FM-Agent from inside the IDE.
 
 ## What it does
 
-- Adds `Tools > FM Agent: Show Project Info`.
-- Adds a right-side `FM Agent` Tool Window.
-- Reads the currently opened project path and detects common HarmonyOS files such as `hvigorfile.ts`, `build-profile.json5`, and `oh-package.json5`.
+- Adds `Tools > FM Agent: Open Panel` to open the `FM Agent` Tool Window.
+- Configures the local `FM-Agent-Internal` path from the IDE.
+- Runs `./install_mac.sh` from that path on macOS.
+- Runs `uv run python main.py <project>` against the current DevEco project.
+- Verifies an editor selection by copying the selected code into a temporary git repository, then running FM-Agent on that repository.
+- Displays process output, `summary.json` counts, bug report paths, and the tail of `fm_agent/fm_agent.log`.
 
 ## Build
 
@@ -33,7 +36,7 @@ DEVECO_HOME=/Applications/DevEco-Studio.app/Contents ./scripts/build-plugin.sh
 The plugin ZIP is generated at:
 
 ```bash
-build/distributions/fm-agent-deveco-plugin-0.1.0.zip
+build/distributions/fm-agent-deveco-plugin-0.2.0.zip
 ```
 
 ## Import into DevEco Studio
@@ -42,7 +45,7 @@ build/distributions/fm-agent-deveco-plugin-0.1.0.zip
 2. Go to `Settings/Preferences > Plugins`.
 3. Click the gear icon.
 4. Choose `Install Plugin from Disk`.
-5. Select `build/distributions/fm-agent-deveco-plugin-0.1.0.zip`.
+5. Select `build/distributions/fm-agent-deveco-plugin-0.2.0.zip`.
 6. Restart DevEco Studio.
 
 ## Test with ExampleCppApp
@@ -59,4 +62,12 @@ Or open it manually:
 /Users/lianganran/codes/2_SJTU_code/FM-agent/ExampleCppApp
 ```
 
-After the project opens, use `Tools > FM Agent: Show Project Info` or open the `FM Agent` Tool Window.
+After the project opens, use `Tools > FM Agent: Open Panel` or open the `FM Agent` Tool Window.
+
+Default FM-Agent path in the Tool Window:
+
+```bash
+/Users/lianganran/codes/2_SJTU_code/FM-agent/FM-Agent-Internal
+```
+
+Use `Verify Project` for the whole DevEco project. Select code in the editor and use `Verify Selection` for a smaller temporary project.
