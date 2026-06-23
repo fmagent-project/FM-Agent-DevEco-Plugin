@@ -1,12 +1,9 @@
 package com.fmagent.deveco;
 
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.editor.Editor;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -56,7 +53,6 @@ final class FmAgentPanel extends JPanel {
     private final JButton installButton;
     private final JButton checkEnvironmentButton;
     private final JButton verifyProjectButton;
-    private final JButton verifySelectionButton;
     private final JButton getResultsButton;
     private final JButton stopButton;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -87,7 +83,6 @@ final class FmAgentPanel extends JPanel {
         installButton = new JButton("Install FM-Agent");
         checkEnvironmentButton = new JButton("Check Environment");
         verifyProjectButton = new JButton("Verify Project");
-        verifySelectionButton = new JButton("Verify Selection");
         getResultsButton = new JButton("Get Results");
         stopButton = new JButton("Stop");
         stopButton.setEnabled(false);
@@ -102,7 +97,6 @@ final class FmAgentPanel extends JPanel {
         installButton.addActionListener(event -> installFmAgent());
         checkEnvironmentButton.addActionListener(event -> checkEnvironment());
         verifyProjectButton.addActionListener(event -> verifyProject());
-        verifySelectionButton.addActionListener(event -> verifySelection());
         getResultsButton.addActionListener(event -> refreshResults());
         stopButton.addActionListener(event -> stopCurrentProcess());
     }
@@ -199,7 +193,6 @@ final class FmAgentPanel extends JPanel {
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         buttons.add(verifyProjectButton);
-        buttons.add(verifySelectionButton);
         buttons.add(stopButton);
         content.add(buttons, constraints);
 
@@ -283,45 +276,23 @@ final class FmAgentPanel extends JPanel {
                 FmAgentCommands.verifyCommand(projectPath, resume.isSelected(), isolate.isSelected(), timeoutSeconds()));
     }
 
-    private void verifySelection() {
-        Path home = requireFmAgentHome();
-        if (home == null) {
-            return;
-        }
-
-        Editor editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
-        if (editor == null || !editor.getSelectionModel().hasSelection()) {
-            Messages.showWarningDialog(project, "Select code in the editor before running selection verification.", "FM Agent");
-            return;
-        }
-
-        String selectedText = editor.getSelectionModel().getSelectedText();
-        if (selectedText == null || selectedText.trim().isEmpty()) {
-            Messages.showWarningDialog(project, "The current selection is empty.", "FM Agent");
-            return;
-        }
-
-        VirtualFile file = FileEditorManager.getInstance(project).getSelectedFiles().length == 0
-                ? null
-                : FileEditorManager.getInstance(project).getSelectedFiles()[0];
-
-        try {
-            Path selectionRepo = FmAgentSelectionProject.create(selectedText, file);
-            lastTargetPath = selectionRepo;
-            runProcess(home, selectionRepo, "Verifying selection",
-                    FmAgentCommands.verifyCommand(selectionRepo, false, false, timeoutSeconds()));
-        } catch (IOException exception) {
-            appendLine("Failed to prepare selection project: " + exception.getMessage());
-        }
+    private void refreshResults() {
+        refreshResults(true);
     }
 
-    private void refreshResults() {
-        Path target = lastTargetPath != null ? lastTargetPath : projectPath();
+    void refreshResultsSilently() {
+        refreshResults(false);
+    }
+
+    private void refreshResults(boolean showResult) {
+        Path target = resultTarget(showResult);
         if (target == null) {
             return;
         }
-        setResultText(FmAgentResults.render(target));
-        showVerifyResult();
+        updateResultViews(target);
+        if (showResult) {
+            showVerifyResult();
+        }
     }
 
     private Path requireFmAgentHome() {
@@ -359,6 +330,20 @@ final class FmAgentPanel extends JPanel {
         return Path.of(basePath);
     }
 
+    private Path resultTarget(boolean showWarning) {
+        if (lastTargetPath != null) {
+            return lastTargetPath;
+        }
+        String basePath = project.getBasePath();
+        if (basePath == null || basePath.isBlank()) {
+            if (showWarning) {
+                Messages.showWarningDialog(project, "Open a project before getting FM-Agent results.", "FM Agent");
+            }
+            return null;
+        }
+        return Path.of(basePath);
+    }
+
     private void runProcess(Path fmAgentHomePath, Path targetPath, String title, String command) {
         runProcess(fmAgentHomePath, targetPath, title, command, true, true);
     }
@@ -371,6 +356,9 @@ final class FmAgentPanel extends JPanel {
                             boolean monitorFmAgentTrace, boolean updateResultsOnSuccess) {
         showMonitor();
         setRunning(true);
+        if (updateResultsOnSuccess) {
+            updateResultViews(targetPath);
+        }
         appendLine("");
         appendLine("=== " + title + " ===");
         appendLine("FM-Agent: " + fmAgentHomePath);
@@ -396,6 +384,9 @@ final class FmAgentPanel extends JPanel {
                     if (monitorFmAgentTrace) {
                         append(monitor.poll(targetPath, currentProcess));
                     }
+                    if (updateResultsOnSuccess) {
+                        updateResultViews(targetPath);
+                    }
                     currentProcess.waitFor(5, TimeUnit.SECONDS);
                 }
 
@@ -413,9 +404,9 @@ final class FmAgentPanel extends JPanel {
             } finally {
                 currentProcess = null;
                 setRunning(false);
-                if (exitCode == 0 && updateResultsOnSuccess) {
-                    setResultText(FmAgentResults.render(targetPath));
-                    appendLine("Verify Result updated for " + targetPath);
+                if (updateResultsOnSuccess) {
+                    updateResultViews(targetPath);
+                    appendLine("Verify Result refreshed for " + targetPath);
                 }
             }
         });
@@ -457,7 +448,6 @@ final class FmAgentPanel extends JPanel {
             installButton.setEnabled(!running);
             checkEnvironmentButton.setEnabled(!running);
             verifyProjectButton.setEnabled(!running);
-            verifySelectionButton.setEnabled(!running);
             getResultsButton.setEnabled(true);
             stopButton.setEnabled(running);
         });
@@ -479,6 +469,10 @@ final class FmAgentPanel extends JPanel {
             resultOutput.setText(text);
             resultOutput.setCaretPosition(0);
         });
+    }
+
+    private void updateResultViews(Path targetPath) {
+        setResultText(FmAgentResults.render(targetPath));
     }
 
     private void showMonitor() {
