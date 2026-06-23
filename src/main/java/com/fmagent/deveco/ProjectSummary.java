@@ -44,7 +44,7 @@ final class ProjectSummary {
     String asText() {
         String lineSeparator = System.lineSeparator();
         StringBuilder builder = new StringBuilder();
-        builder.append("FM Agent DevEco Runner").append(lineSeparator);
+        builder.append("FM Agent DevEco Plugin").append(lineSeparator);
         builder.append(lineSeparator);
         builder.append("Project: ").append(projectName).append(lineSeparator);
         builder.append("Base path: ").append(basePath).append(lineSeparator);

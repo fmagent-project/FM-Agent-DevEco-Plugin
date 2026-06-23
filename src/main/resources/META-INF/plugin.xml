@@ -2,7 +2,7 @@
     <id>com.fmagent.deveco.minimal</id>
     <name>FM Agent DevEco Minimal</name>
     <vendor>FM Agent</vendor>
-    <version>0.4.0</version>
+    <version>0.5.0</version>
 
     <idea-version since-build="243" until-build="243.*"/>
 

@@ -40,7 +40,7 @@ DEVECO_HOME=/Applications/DevEco-Studio.app/Contents ./scripts/build-plugin.sh
 The plugin ZIP is generated at:
 
 ```bash
-build/distributions/fm-agent-deveco-plugin-0.4.0.zip
+build/distributions/fm-agent-deveco-plugin-0.5.0.zip
 ```
 
 ## Import into DevEco Studio
@@ -49,7 +49,7 @@ build/distributions/fm-agent-deveco-plugin-0.4.0.zip
 2. Go to `Settings/Preferences > Plugins`.
 3. Click the gear icon.
 4. Choose `Install Plugin from Disk`.
-5. Select `build/distributions/fm-agent-deveco-plugin-0.4.0.zip`.
+5. Select `build/distributions/fm-agent-deveco-plugin-0.5.0.zip`.
 6. Restart DevEco Studio.
 
 ## Test with ExampleCppApp

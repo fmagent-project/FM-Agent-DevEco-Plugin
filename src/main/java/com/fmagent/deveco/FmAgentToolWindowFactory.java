@@ -11,8 +11,20 @@ import org.jetbrains.annotations.NotNull;
 public final class FmAgentToolWindowFactory implements ToolWindowFactory, DumbAware {
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
-        Content content = ContentFactory.getInstance()
-                .createContent(new FmAgentPanel(project), "Runner", false);
-        toolWindow.getContentManager().addContent(content);
+        FmAgentPanel panel = new FmAgentPanel(project);
+        ContentFactory contentFactory = ContentFactory.getInstance();
+
+        Content mainContent = contentFactory.createContent(panel, "Main", false);
+        Content monitorContent = contentFactory.createContent(panel.monitorComponent(), "Monitor", false);
+        Content verifyResultContent = contentFactory.createContent(panel.verifyResultComponent(), "Verify Result", false);
+
+        panel.setNavigationActions(
+                () -> toolWindow.getContentManager().setSelectedContent(monitorContent),
+                () -> toolWindow.getContentManager().setSelectedContent(verifyResultContent));
+
+        toolWindow.getContentManager().addContent(mainContent);
+        toolWindow.getContentManager().addContent(monitorContent);
+        toolWindow.getContentManager().addContent(verifyResultContent);
+        toolWindow.getContentManager().setSelectedContent(mainContent);
     }
 }

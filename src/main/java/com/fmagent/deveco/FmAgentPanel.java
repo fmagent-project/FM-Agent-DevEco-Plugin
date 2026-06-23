@@ -8,8 +8,12 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.editor.Editor;
 
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -19,6 +23,7 @@ import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
@@ -44,17 +49,24 @@ final class FmAgentPanel extends JPanel {
     private final JTextField opencodeTimeoutSeconds;
     private final JCheckBox resume;
     private final JCheckBox isolate;
-    private final JTextArea output;
+    private final JTextArea monitorOutput;
+    private final JTextArea resultOutput;
+    private final JPanel monitorPanel;
+    private final JPanel resultPanel;
     private final JButton installButton;
     private final JButton checkEnvironmentButton;
     private final JButton verifyProjectButton;
     private final JButton verifySelectionButton;
-    private final JButton refreshButton;
+    private final JButton getResultsButton;
     private final JButton stopButton;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     private volatile Process currentProcess;
     private volatile Path lastTargetPath;
+    private Runnable showMonitorAction = () -> {
+    };
+    private Runnable showVerifyResultAction = () -> {
+    };
 
     FmAgentPanel(Project project) {
         super(new BorderLayout(8, 8));
@@ -67,21 +79,20 @@ final class FmAgentPanel extends JPanel {
         opencodeTimeoutSeconds = new JTextField(properties.getValue("com.fmagent.deveco.opencodeTimeoutSeconds", "300"), 8);
         resume = new JCheckBox("Resume", true);
         isolate = new JCheckBox("Isolate", false);
-        output = new JTextArea(ProjectSummary.from(project).asText());
-        output.setEditable(false);
-        output.setLineWrap(false);
-        output.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        monitorOutput = createOutputArea(ProjectSummary.from(project).asText());
+        resultOutput = createOutputArea("No verification result loaded." + System.lineSeparator());
+        monitorPanel = buildMonitorPanel();
+        resultPanel = buildVerifyResultPanel();
 
         installButton = new JButton("Install FM-Agent");
         checkEnvironmentButton = new JButton("Check Environment");
         verifyProjectButton = new JButton("Verify Project");
         verifySelectionButton = new JButton("Verify Selection");
-        refreshButton = new JButton("Refresh Results");
+        getResultsButton = new JButton("Get Results");
         stopButton = new JButton("Stop");
         stopButton.setEnabled(false);
 
-        add(buildTopPanel(properties), BorderLayout.NORTH);
-        add(new JScrollPane(output), BorderLayout.CENTER);
+        add(buildMainPanel(properties), BorderLayout.CENTER);
 
         Disposer.register(project, () -> {
             stopCurrentProcess();
@@ -92,11 +103,39 @@ final class FmAgentPanel extends JPanel {
         checkEnvironmentButton.addActionListener(event -> checkEnvironment());
         verifyProjectButton.addActionListener(event -> verifyProject());
         verifySelectionButton.addActionListener(event -> verifySelection());
-        refreshButton.addActionListener(event -> refreshResults());
+        getResultsButton.addActionListener(event -> refreshResults());
         stopButton.addActionListener(event -> stopCurrentProcess());
     }
 
-    private JPanel buildTopPanel(PropertiesComponent properties) {
+    JComponent monitorComponent() {
+        return monitorPanel;
+    }
+
+    JComponent verifyResultComponent() {
+        return resultPanel;
+    }
+
+    void setNavigationActions(Runnable showMonitorAction, Runnable showVerifyResultAction) {
+        this.showMonitorAction = showMonitorAction;
+        this.showVerifyResultAction = showVerifyResultAction;
+    }
+
+    private JTextArea createOutputArea(String initialText) {
+        JTextArea area = new JTextArea(initialText);
+        area.setEditable(false);
+        area.setLineWrap(false);
+        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        return area;
+    }
+
+    private JPanel buildMainPanel(PropertiesComponent properties) {
+        JPanel panel = new JPanel(new BorderLayout(0, 12));
+        panel.add(buildSettingsPanel(properties), BorderLayout.NORTH);
+        panel.add(buildActionPanel(), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel buildSettingsPanel(PropertiesComponent properties) {
         JPanel panel = new JPanel(new GridBagLayout());
         GridBagConstraints constraints = new GridBagConstraints();
         constraints.insets = new Insets(0, 0, 8, 8);
@@ -127,35 +166,79 @@ final class FmAgentPanel extends JPanel {
         constraints.fill = GridBagConstraints.NONE;
         panel.add(opencodeTimeoutSeconds, constraints);
 
-        JPanel buttons = new JPanel(new GridBagLayout());
-        GridBagConstraints buttonConstraints = new GridBagConstraints();
-        buttonConstraints.gridx = 0;
-        buttonConstraints.gridy = 0;
-        buttonConstraints.anchor = GridBagConstraints.WEST;
-        buttonConstraints.insets = new Insets(0, 0, 4, 0);
+        return panel;
+    }
 
-        JPanel runButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        runButtons.add(installButton);
-        runButtons.add(checkEnvironmentButton);
-        runButtons.add(verifyProjectButton);
-        runButtons.add(verifySelectionButton);
-        buttons.add(runButtons, buttonConstraints);
+    private JPanel buildActionPanel() {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.add(buildInstallGroup());
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(buildVerifyGroup());
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(buildResultsGroup());
+        panel.add(Box.createVerticalGlue());
+        return panel;
+    }
 
-        buttonConstraints.gridy = 1;
-        buttonConstraints.insets = new Insets(0, 0, 0, 0);
-        JPanel utilityButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        utilityButtons.add(refreshButton);
-        utilityButtons.add(stopButton);
-        utilityButtons.add(resume);
-        utilityButtons.add(isolate);
-        buttons.add(utilityButtons, buttonConstraints);
+    private JPanel buildInstallGroup() {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        row.add(installButton);
+        row.add(checkEnvironmentButton);
+        return buildActionGroup("1. Install and Environment", row);
+    }
 
+    private JPanel buildVerifyGroup() {
+        JPanel content = new JPanel(new GridBagLayout());
+        GridBagConstraints constraints = new GridBagConstraints();
         constraints.gridx = 0;
-        constraints.gridy = 2;
-        constraints.gridwidth = 3;
+        constraints.gridy = 0;
+        constraints.anchor = GridBagConstraints.WEST;
         constraints.fill = GridBagConstraints.HORIZONTAL;
-        panel.add(buttons, constraints);
+        constraints.weightx = 1;
 
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        buttons.add(verifyProjectButton);
+        buttons.add(verifySelectionButton);
+        buttons.add(stopButton);
+        content.add(buttons, constraints);
+
+        constraints.gridy = 1;
+        JPanel options = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        options.add(new JLabel("Options"));
+        options.add(resume);
+        options.add(isolate);
+        content.add(options, constraints);
+
+        return buildActionGroup("2. Verify Code", content);
+    }
+
+    private JPanel buildResultsGroup() {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        row.add(getResultsButton);
+        return buildActionGroup("3. Get Results", row);
+    }
+
+    private JPanel buildActionGroup(String title, JComponent content) {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createTitledBorder(title));
+        panel.add(content, BorderLayout.CENTER);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
+        return panel;
+    }
+
+    private JPanel buildMonitorPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(new EmptyBorder(12, 12, 12, 12));
+        panel.add(new JScrollPane(monitorOutput), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel buildVerifyResultPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(new EmptyBorder(12, 12, 12, 12));
+        panel.add(new JScrollPane(resultOutput), BorderLayout.CENTER);
         return panel;
     }
 
@@ -175,7 +258,7 @@ final class FmAgentPanel extends JPanel {
         if (home == null) {
             return;
         }
-        runProcess(home, home, "Installing FM-Agent", FmAgentCommands.installCommand());
+        runProcess(home, home, "Installing FM-Agent", FmAgentCommands.installCommand(), false, false);
     }
 
     private void checkEnvironment() {
@@ -237,9 +320,8 @@ final class FmAgentPanel extends JPanel {
         if (target == null) {
             return;
         }
-        appendLine("");
-        appendLine("=== FM-Agent results: " + target + " ===");
-        append(FmAgentResults.render(target));
+        setResultText(FmAgentResults.render(target));
+        showVerifyResult();
     }
 
     private Path requireFmAgentHome() {
@@ -278,10 +360,16 @@ final class FmAgentPanel extends JPanel {
     }
 
     private void runProcess(Path fmAgentHomePath, Path targetPath, String title, String command) {
-        runProcess(fmAgentHomePath, targetPath, title, command, true);
+        runProcess(fmAgentHomePath, targetPath, title, command, true, true);
     }
 
     private void runProcess(Path fmAgentHomePath, Path targetPath, String title, String command, boolean monitorFmAgentTrace) {
+        runProcess(fmAgentHomePath, targetPath, title, command, monitorFmAgentTrace, false);
+    }
+
+    private void runProcess(Path fmAgentHomePath, Path targetPath, String title, String command,
+                            boolean monitorFmAgentTrace, boolean updateResultsOnSuccess) {
+        showMonitor();
         setRunning(true);
         appendLine("");
         appendLine("=== " + title + " ===");
@@ -325,8 +413,9 @@ final class FmAgentPanel extends JPanel {
             } finally {
                 currentProcess = null;
                 setRunning(false);
-                if (exitCode == 0) {
-                    append(FmAgentResults.render(targetPath));
+                if (exitCode == 0 && updateResultsOnSuccess) {
+                    setResultText(FmAgentResults.render(targetPath));
+                    appendLine("Verify Result updated for " + targetPath);
                 }
             }
         });
@@ -369,19 +458,34 @@ final class FmAgentPanel extends JPanel {
             checkEnvironmentButton.setEnabled(!running);
             verifyProjectButton.setEnabled(!running);
             verifySelectionButton.setEnabled(!running);
-            refreshButton.setEnabled(true);
+            getResultsButton.setEnabled(true);
             stopButton.setEnabled(running);
         });
     }
 
     private void append(String text) {
         SwingUtilities.invokeLater(() -> {
-            output.append(text);
-            output.setCaretPosition(output.getDocument().getLength());
+            monitorOutput.append(text);
+            monitorOutput.setCaretPosition(monitorOutput.getDocument().getLength());
         });
     }
 
     private void appendLine(String line) {
         append(line + System.lineSeparator());
+    }
+
+    private void setResultText(String text) {
+        SwingUtilities.invokeLater(() -> {
+            resultOutput.setText(text);
+            resultOutput.setCaretPosition(0);
+        });
+    }
+
+    private void showMonitor() {
+        SwingUtilities.invokeLater(showMonitorAction);
+    }
+
+    private void showVerifyResult() {
+        SwingUtilities.invokeLater(showVerifyResultAction);
     }
 }
