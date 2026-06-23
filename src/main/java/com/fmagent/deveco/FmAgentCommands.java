@@ -3,14 +3,36 @@ package com.fmagent.deveco;
 import java.nio.file.Path;
 
 final class FmAgentCommands {
+    private static final String FM_AGENT_REPOSITORY_URL = "https://github.com/fmagent-project/FM-Agent.git";
     private static final String MAC_PATH_EXPORT =
             "export PATH=\"$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"";
 
     private FmAgentCommands() {
     }
 
-    static String installCommand() {
-        return MAC_PATH_EXPORT + " && export PYTHONUNBUFFERED=1 PYTHONIOENCODING=UTF-8 && ./install_mac.sh";
+    static String installCommand(Path fmAgentHome, Path targetPath, boolean cloneRepository) {
+        StringBuilder command = new StringBuilder(MAC_PATH_EXPORT);
+        command.append(" && export PYTHONUNBUFFERED=1 PYTHONIOENCODING=UTF-8");
+        command.append(" && command -v git");
+        if (cloneRepository) {
+            command.append(" && echo '## Cloning FM-Agent'");
+            command.append(" && mkdir -p ");
+            command.append(shellQuote(fmAgentHome.getParent().toString()));
+            command.append(" && git clone ");
+            command.append(shellQuote(FM_AGENT_REPOSITORY_URL));
+            command.append(" ");
+            command.append(shellQuote(fmAgentHome.toString()));
+        }
+        command.append(" && cd ");
+        command.append(shellQuote(fmAgentHome.toString()));
+        command.append(" && ./install.sh");
+        command.append(" && echo '## Project git repository'");
+        command.append(" && if [ -e ");
+        command.append(shellQuote(targetPath.resolve(".git").toString()));
+        command.append(" ]; then echo '[ok] project git repository exists'; else echo '[..] initializing git repository in project' && git -C ");
+        command.append(shellQuote(targetPath.toString()));
+        command.append(" init; fi");
+        return command.toString();
     }
 
     static String environmentCheckCommand(Path targetPath, String opencodeTimeoutSeconds) {

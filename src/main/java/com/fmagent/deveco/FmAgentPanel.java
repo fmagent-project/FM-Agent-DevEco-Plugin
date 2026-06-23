@@ -247,11 +247,35 @@ final class FmAgentPanel extends JPanel {
     }
 
     private void installFmAgent() {
-        Path home = requireFmAgentHome();
-        if (home == null) {
+        Path home = fmAgentHomePath();
+        Path projectPath = projectPath();
+        if (home == null || projectPath == null) {
             return;
         }
-        runProcess(home, home, "Installing FM-Agent", FmAgentCommands.installCommand(), false, false);
+
+        boolean cloneRepository = !Files.exists(home);
+        Path workingDirectory = home;
+        if (cloneRepository) {
+            Path parent = home.getParent();
+            if (parent == null) {
+                Messages.showWarningDialog(project, "FM-Agent path must have a parent directory: " + home, "FM Agent");
+                return;
+            }
+            try {
+                Files.createDirectories(parent);
+            } catch (IOException exception) {
+                Messages.showWarningDialog(project,
+                        "Could not create FM-Agent parent directory: " + parent + System.lineSeparator() + exception.getMessage(),
+                        "FM Agent");
+                return;
+            }
+            workingDirectory = parent;
+        } else if (!validateExistingFmAgentHome(home)) {
+            return;
+        }
+
+        runProcess(home, projectPath, workingDirectory, "Installing FM-Agent",
+                FmAgentCommands.installCommand(home, projectPath, cloneRepository), false, false);
     }
 
     private void checkEnvironment() {
@@ -296,23 +320,36 @@ final class FmAgentPanel extends JPanel {
     }
 
     private Path requireFmAgentHome() {
+        Path home = fmAgentHomePath();
+        if (home == null) {
+            return null;
+        }
+        if (!validateExistingFmAgentHome(home)) {
+            return null;
+        }
+        return home;
+    }
+
+    private Path fmAgentHomePath() {
         String path = fmAgentHome.getText().trim();
         PropertiesComponent.getInstance(project).setValue(FM_AGENT_HOME_KEY, path);
         if (path.isEmpty()) {
             Messages.showWarningDialog(project, "Set the FM-Agent path first.", "FM Agent");
             return null;
         }
+        return Path.of(path).toAbsolutePath().normalize();
+    }
 
-        Path home = Path.of(path);
+    private boolean validateExistingFmAgentHome(Path home) {
         if (!Files.isDirectory(home)) {
             Messages.showWarningDialog(project, "FM-Agent path does not exist: " + home, "FM Agent");
-            return null;
+            return false;
         }
         if (!Files.isRegularFile(home.resolve("main.py"))) {
             Messages.showWarningDialog(project, "FM-Agent path must contain main.py: " + home, "FM Agent");
-            return null;
+            return false;
         }
-        return home;
+        return true;
     }
 
     private String timeoutSeconds() {
@@ -354,6 +391,11 @@ final class FmAgentPanel extends JPanel {
 
     private void runProcess(Path fmAgentHomePath, Path targetPath, String title, String command,
                             boolean monitorFmAgentTrace, boolean updateResultsOnSuccess) {
+        runProcess(fmAgentHomePath, targetPath, fmAgentHomePath, title, command, monitorFmAgentTrace, updateResultsOnSuccess);
+    }
+
+    private void runProcess(Path fmAgentHomePath, Path targetPath, Path workingDirectory, String title, String command,
+                            boolean monitorFmAgentTrace, boolean updateResultsOnSuccess) {
         showMonitor();
         setRunning(true);
         if (updateResultsOnSuccess) {
@@ -363,6 +405,7 @@ final class FmAgentPanel extends JPanel {
         appendLine("=== " + title + " ===");
         appendLine("FM-Agent: " + fmAgentHomePath);
         appendLine("Target: " + targetPath);
+        appendLine("Working directory: " + workingDirectory);
         appendLine("Command: " + command);
         append(FmAgentEnvironment.describe(fmAgentHomePath, timeoutSeconds()));
 
@@ -371,7 +414,7 @@ final class FmAgentPanel extends JPanel {
             FmAgentLogMonitor monitor = new FmAgentLogMonitor(targetPath);
             try {
                 ProcessBuilder builder = new ProcessBuilder("/bin/bash", "-lc", command);
-                builder.directory(fmAgentHomePath.toFile());
+                builder.directory(workingDirectory.toFile());
                 builder.redirectErrorStream(true);
                 currentProcess = builder.start();
                 closeProcessInput(currentProcess);
