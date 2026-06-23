@@ -28,8 +28,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Comparator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 final class FmAgentPanel extends JPanel {
     private static final String DEFAULT_FM_AGENT_HOME =
@@ -38,10 +41,12 @@ final class FmAgentPanel extends JPanel {
 
     private final Project project;
     private final JTextField fmAgentHome;
+    private final JTextField opencodeTimeoutSeconds;
     private final JCheckBox resume;
     private final JCheckBox isolate;
     private final JTextArea output;
     private final JButton installButton;
+    private final JButton checkEnvironmentButton;
     private final JButton verifyProjectButton;
     private final JButton verifySelectionButton;
     private final JButton refreshButton;
@@ -59,6 +64,7 @@ final class FmAgentPanel extends JPanel {
 
         PropertiesComponent properties = PropertiesComponent.getInstance(project);
         fmAgentHome = new JTextField(properties.getValue(FM_AGENT_HOME_KEY, DEFAULT_FM_AGENT_HOME), 45);
+        opencodeTimeoutSeconds = new JTextField(properties.getValue("com.fmagent.deveco.opencodeTimeoutSeconds", "300"), 8);
         resume = new JCheckBox("Resume", true);
         isolate = new JCheckBox("Isolate", false);
         output = new JTextArea(ProjectSummary.from(project).asText());
@@ -67,6 +73,7 @@ final class FmAgentPanel extends JPanel {
         output.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
 
         installButton = new JButton("Install FM-Agent");
+        checkEnvironmentButton = new JButton("Check Environment");
         verifyProjectButton = new JButton("Verify Project");
         verifySelectionButton = new JButton("Verify Selection");
         refreshButton = new JButton("Refresh Results");
@@ -82,6 +89,7 @@ final class FmAgentPanel extends JPanel {
         });
 
         installButton.addActionListener(event -> installFmAgent());
+        checkEnvironmentButton.addActionListener(event -> checkEnvironment());
         verifyProjectButton.addActionListener(event -> verifyProject());
         verifySelectionButton.addActionListener(event -> verifySelection());
         refreshButton.addActionListener(event -> refreshResults());
@@ -110,17 +118,40 @@ final class FmAgentPanel extends JPanel {
         constraints.fill = GridBagConstraints.NONE;
         panel.add(browse, constraints);
 
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        buttons.add(installButton);
-        buttons.add(verifyProjectButton);
-        buttons.add(verifySelectionButton);
-        buttons.add(refreshButton);
-        buttons.add(stopButton);
-        buttons.add(resume);
-        buttons.add(isolate);
-
         constraints.gridx = 0;
         constraints.gridy = 1;
+        panel.add(new JLabel("OpenCode timeout(s)"), constraints);
+
+        constraints.gridx = 1;
+        constraints.weightx = 0;
+        constraints.fill = GridBagConstraints.NONE;
+        panel.add(opencodeTimeoutSeconds, constraints);
+
+        JPanel buttons = new JPanel(new GridBagLayout());
+        GridBagConstraints buttonConstraints = new GridBagConstraints();
+        buttonConstraints.gridx = 0;
+        buttonConstraints.gridy = 0;
+        buttonConstraints.anchor = GridBagConstraints.WEST;
+        buttonConstraints.insets = new Insets(0, 0, 4, 0);
+
+        JPanel runButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        runButtons.add(installButton);
+        runButtons.add(checkEnvironmentButton);
+        runButtons.add(verifyProjectButton);
+        runButtons.add(verifySelectionButton);
+        buttons.add(runButtons, buttonConstraints);
+
+        buttonConstraints.gridy = 1;
+        buttonConstraints.insets = new Insets(0, 0, 0, 0);
+        JPanel utilityButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        utilityButtons.add(refreshButton);
+        utilityButtons.add(stopButton);
+        utilityButtons.add(resume);
+        utilityButtons.add(isolate);
+        buttons.add(utilityButtons, buttonConstraints);
+
+        constraints.gridx = 0;
+        constraints.gridy = 2;
         constraints.gridwidth = 3;
         constraints.fill = GridBagConstraints.HORIZONTAL;
         panel.add(buttons, constraints);
@@ -147,6 +178,17 @@ final class FmAgentPanel extends JPanel {
         runProcess(home, home, "Installing FM-Agent", FmAgentCommands.installCommand());
     }
 
+    private void checkEnvironment() {
+        Path home = requireFmAgentHome();
+        Path projectPath = projectPath();
+        if (home == null || projectPath == null) {
+            return;
+        }
+        lastTargetPath = projectPath;
+        runProcess(home, projectPath, "Checking FM-Agent/OpenCode environment",
+                FmAgentCommands.environmentCheckCommand(projectPath, timeoutSeconds()), false);
+    }
+
     private void verifyProject() {
         Path home = requireFmAgentHome();
         Path projectPath = projectPath();
@@ -154,7 +196,8 @@ final class FmAgentPanel extends JPanel {
             return;
         }
         lastTargetPath = projectPath;
-        runProcess(home, projectPath, "Verifying project", FmAgentCommands.verifyCommand(projectPath, resume.isSelected(), isolate.isSelected()));
+        runProcess(home, projectPath, "Verifying project",
+                FmAgentCommands.verifyCommand(projectPath, resume.isSelected(), isolate.isSelected(), timeoutSeconds()));
     }
 
     private void verifySelection() {
@@ -182,7 +225,8 @@ final class FmAgentPanel extends JPanel {
         try {
             Path selectionRepo = FmAgentSelectionProject.create(selectedText, file);
             lastTargetPath = selectionRepo;
-            runProcess(home, selectionRepo, "Verifying selection", FmAgentCommands.verifyCommand(selectionRepo, false, false));
+            runProcess(home, selectionRepo, "Verifying selection",
+                    FmAgentCommands.verifyCommand(selectionRepo, false, false, timeoutSeconds()));
         } catch (IOException exception) {
             appendLine("Failed to prepare selection project: " + exception.getMessage());
         }
@@ -218,6 +262,12 @@ final class FmAgentPanel extends JPanel {
         return home;
     }
 
+    private String timeoutSeconds() {
+        String timeout = opencodeTimeoutSeconds.getText().trim();
+        PropertiesComponent.getInstance(project).setValue("com.fmagent.deveco.opencodeTimeoutSeconds", timeout);
+        return timeout;
+    }
+
     private Path projectPath() {
         String basePath = project.getBasePath();
         if (basePath == null || basePath.isBlank()) {
@@ -228,29 +278,44 @@ final class FmAgentPanel extends JPanel {
     }
 
     private void runProcess(Path fmAgentHomePath, Path targetPath, String title, String command) {
+        runProcess(fmAgentHomePath, targetPath, title, command, true);
+    }
+
+    private void runProcess(Path fmAgentHomePath, Path targetPath, String title, String command, boolean monitorFmAgentTrace) {
         setRunning(true);
         appendLine("");
         appendLine("=== " + title + " ===");
         appendLine("FM-Agent: " + fmAgentHomePath);
         appendLine("Target: " + targetPath);
         appendLine("Command: " + command);
+        append(FmAgentEnvironment.describe(fmAgentHomePath, timeoutSeconds()));
 
         executor.submit(() -> {
             int exitCode = -1;
+            FmAgentLogMonitor monitor = new FmAgentLogMonitor(targetPath);
             try {
                 ProcessBuilder builder = new ProcessBuilder("/bin/bash", "-lc", command);
                 builder.directory(fmAgentHomePath.toFile());
                 builder.redirectErrorStream(true);
                 currentProcess = builder.start();
+                closeProcessInput(currentProcess);
 
-                try (var reader = currentProcess.inputReader(StandardCharsets.UTF_8)) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        appendLine(line);
+                Thread outputThread = new Thread(() -> copyProcessOutput(currentProcess), "fm-agent-output-reader");
+                outputThread.setDaemon(true);
+                outputThread.start();
+
+                while (currentProcess.isAlive()) {
+                    if (monitorFmAgentTrace) {
+                        append(monitor.poll(targetPath, currentProcess));
                     }
+                    currentProcess.waitFor(5, TimeUnit.SECONDS);
                 }
 
                 exitCode = currentProcess.waitFor();
+                outputThread.join(Duration.ofSeconds(2).toMillis());
+                if (monitorFmAgentTrace) {
+                    append(monitor.poll(targetPath, currentProcess));
+                }
                 appendLine("Process exited with code " + exitCode);
             } catch (IOException exception) {
                 appendLine("Process failed: " + exception.getMessage());
@@ -267,9 +332,32 @@ final class FmAgentPanel extends JPanel {
         });
     }
 
+    private void closeProcessInput(Process process) {
+        try {
+            // OpenCode treats non-TTY stdin as input and waits for EOF; the plugin never writes to it.
+            process.getOutputStream().close();
+        } catch (IOException exception) {
+            appendLine("Could not close process input: " + exception.getMessage());
+        }
+    }
+
+    private void copyProcessOutput(Process process) {
+        try (var reader = process.inputReader(StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                appendLine(line);
+            }
+        } catch (IOException exception) {
+            appendLine("Could not read process output: " + exception.getMessage());
+        }
+    }
+
     private void stopCurrentProcess() {
         Process process = currentProcess;
         if (process != null) {
+            process.toHandle().descendants()
+                    .sorted(Comparator.comparingLong(ProcessHandle::pid).reversed())
+                    .forEach(ProcessHandle::destroy);
             process.destroy();
             appendLine("Stop requested.");
         }
@@ -278,9 +366,10 @@ final class FmAgentPanel extends JPanel {
     private void setRunning(boolean running) {
         SwingUtilities.invokeLater(() -> {
             installButton.setEnabled(!running);
+            checkEnvironmentButton.setEnabled(!running);
             verifyProjectButton.setEnabled(!running);
             verifySelectionButton.setEnabled(!running);
-            refreshButton.setEnabled(!running);
+            refreshButton.setEnabled(true);
             stopButton.setEnabled(running);
         });
     }

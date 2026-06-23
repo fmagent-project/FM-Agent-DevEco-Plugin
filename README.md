@@ -9,7 +9,11 @@ DevEco Studio plugin demo for running FM-Agent from inside the IDE.
 - Runs `./install_mac.sh` from that path on macOS.
 - Runs `uv run python main.py <project>` against the current DevEco project.
 - Verifies an editor selection by copying the selected code into a temporary git repository, then running FM-Agent on that repository.
+- Runs an environment self-check for FM-Agent, OpenCode, the configured OpenAI-compatible API, and an OpenCode smoke test.
 - Displays process output, `summary.json` counts, bug report paths, and the tail of `fm_agent/fm_agent.log`.
+- Streams FM-Agent runtime diagnostics while a run is still active, including `fm_agent/fm_agent.log`, `fm_agent/trace/events.jsonl`, and `fm_agent/trace/payloads/*_opencode.log`.
+- Shows a redacted environment summary for provider/model/base URL and lets you set `OPENCODE_TIMEOUT_SECONDS` from the panel.
+- Enables verbose OpenCode child-process logs for verification runs with `OPENCODE_PRINT_LOGS=1` and `OPENCODE_LOG_LEVEL=INFO`.
 
 ## Build
 
@@ -36,7 +40,7 @@ DEVECO_HOME=/Applications/DevEco-Studio.app/Contents ./scripts/build-plugin.sh
 The plugin ZIP is generated at:
 
 ```bash
-build/distributions/fm-agent-deveco-plugin-0.2.0.zip
+build/distributions/fm-agent-deveco-plugin-0.4.0.zip
 ```
 
 ## Import into DevEco Studio
@@ -45,7 +49,7 @@ build/distributions/fm-agent-deveco-plugin-0.2.0.zip
 2. Go to `Settings/Preferences > Plugins`.
 3. Click the gear icon.
 4. Choose `Install Plugin from Disk`.
-5. Select `build/distributions/fm-agent-deveco-plugin-0.2.0.zip`.
+5. Select `build/distributions/fm-agent-deveco-plugin-0.4.0.zip`.
 6. Restart DevEco Studio.
 
 ## Test with ExampleCppApp
@@ -70,4 +74,8 @@ Default FM-Agent path in the Tool Window:
 /Users/lianganran/codes/2_SJTU_code/FM-agent/FM-Agent-Internal
 ```
 
+Use `Check Environment` before the first run or when OpenCode appears idle. It checks local tools, imports FM-Agent config, calls the configured `/chat/completions` endpoint, and runs `opencode --print-logs --log-level INFO run ... 'reply with OK only'`.
+
 Use `Verify Project` for the whole DevEco project. Select code in the editor and use `Verify Selection` for a smaller temporary project.
+
+If OpenCode hangs without producing output, first run `Check Environment` and check the streamed `fm_agent/trace/payloads/*_opencode.log` output. The default timeout is `300` seconds for faster debugging; use `1200` or `1800` for full project runs.
