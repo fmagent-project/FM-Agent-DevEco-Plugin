@@ -16,8 +16,7 @@ import java.util.stream.Stream;
 
 final class FmAgentResults {
     private static final Pattern COUNT_PATTERN = Pattern.compile("\"%s\"\\s*:\\s*(\\d+)");
-    private static final Pattern BUG_ID_PATTERN = Pattern.compile("\"id\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern BUG_STATUS_PATTERN = Pattern.compile("\"confirmation_status\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern BUG_OBJECT_PATTERN = Pattern.compile("\\{\\s*\"id\"\\s*:\\s*\"[^\"]+\".*?\\}", Pattern.DOTALL);
     private static final Pattern VERDICT_PATTERN = Pattern.compile("\"verdict\"\\s*:\\s*\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
     private static final DateTimeFormatter REFRESH_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -29,6 +28,17 @@ final class FmAgentResults {
         LogicSummary logicSummary = readLogicSummary(workDir);
         BugSummary bugSummary = readBugSummary(workDir);
         return renderSummary(targetPath, workDir, logicSummary, bugSummary);
+    }
+
+    static String emptyHtml() {
+        return htmlDocument("<div class=\"empty\">No verification result loaded.</div>");
+    }
+
+    static String renderHtml(Path targetPath) {
+        Path workDir = targetPath.resolve("fm_agent");
+        LogicSummary logicSummary = readLogicSummary(workDir);
+        BugSummary bugSummary = readBugSummary(workDir);
+        return renderSummaryHtml(targetPath, workDir, logicSummary, bugSummary);
     }
 
     private static String renderSummary(Path targetPath, Path workDir, LogicSummary logicSummary, BugSummary bugSummary) {
@@ -70,23 +80,141 @@ final class FmAgentResults {
 
         builder.append(lineSeparator);
         builder.append("Mismatch functions:").append(lineSeparator);
-        appendList(builder, logicSummary.mismatchExamples(), lineSeparator);
+        appendLinkList(builder, logicSummary.mismatchExamples(), lineSeparator);
 
         builder.append(lineSeparator);
         builder.append("Confirmed Bugs:").append(lineSeparator);
-        appendList(builder, bugSummary.confirmedBugs(), lineSeparator);
+        appendLinkList(builder, bugSummary.confirmedBugs(), lineSeparator);
 
         return builder.toString();
     }
 
-    private static void appendList(StringBuilder builder, List<String> items, String lineSeparator) {
+    private static String renderSummaryHtml(Path targetPath, Path workDir, LogicSummary logicSummary, BugSummary bugSummary) {
+        String refreshed = LocalDateTime.now().format(REFRESH_TIME_FORMAT);
+        StringBuilder builder = new StringBuilder();
+        builder.append("<h2>Logic Verification Summary</h2>");
+        builder.append("<table class=\"meta\">");
+        appendRow(builder, "Refreshed", refreshed);
+        appendRow(builder, "Target", targetPath.toString());
+        appendRow(builder, "Logic results", workDir.resolve("logic_verification_results").toString());
+        appendRow(builder, "Bug results", workDir.resolve("bug_validation").toString());
+        builder.append("</table>");
+
+        builder.append("<div class=\"section\"><h3>Spec Logic Verification</h3>");
+        builder.append("<table class=\"metrics\">");
+        appendMetric(builder, "Extracted functions", Integer.toString(logicSummary.totalFunctions()), "");
+        appendMetric(builder, "Verified functions", Integer.toString(logicSummary.verified()), "");
+        appendMetric(builder, "Mismatch", Integer.toString(logicSummary.mismatch()), "mismatch");
+        appendMetric(builder, "Match", Integer.toString(logicSummary.match()), "match");
+        appendMetric(builder, "Unverified", Integer.toString(logicSummary.unverified()), "pending");
+        builder.append("</table>");
+        if (logicSummary.error() != null) {
+            builder.append("<p class=\"issue\">Logic result read issue: ").append(escape(logicSummary.error())).append("</p>");
+        } else if (logicSummary.resultFiles() == 0) {
+            builder.append("<p class=\"muted\">No logic verification result files found yet.</p>");
+        }
+        builder.append("</div>");
+
+        builder.append("<div class=\"section\"><h3>Bug Validation</h3>");
+        if (bugSummary.available()) {
+            builder.append("<table class=\"metrics\">");
+            appendMetric(builder, "Reported", bugSummary.reported(), "");
+            appendMetric(builder, "Confirmed", bugSummary.confirmed(), "mismatch");
+            appendMetric(builder, "Not confirmed", bugSummary.notConfirmed(), "match");
+            appendMetric(builder, "Errors", bugSummary.errors(), "pending");
+            builder.append("</table>");
+        } else if (bugSummary.error() != null) {
+            builder.append("<p class=\"issue\">Could not read bug summary: ").append(escape(bugSummary.error())).append("</p>");
+        } else {
+            builder.append("<p class=\"muted\">No bug validation summary found yet.</p>");
+        }
+        builder.append("</div>");
+
+        builder.append("<div class=\"section\"><h3>Mismatch functions</h3>");
+        appendLinkListHtml(builder, logicSummary.mismatchExamples());
+        builder.append("</div>");
+
+        builder.append("<div class=\"section\"><h3>Confirmed Bugs</h3>");
+        appendLinkListHtml(builder, bugSummary.confirmedBugs());
+        builder.append("</div>");
+
+        return htmlDocument(builder.toString());
+    }
+
+    private static void appendRow(StringBuilder builder, String label, String value) {
+        builder.append("<tr><td class=\"label\">").append(escape(label)).append("</td><td><code>")
+                .append(escape(value)).append("</code></td></tr>");
+    }
+
+    private static void appendMetric(StringBuilder builder, String label, String value, String valueClass) {
+        builder.append("<tr><td>").append(escape(label)).append("</td><td class=\"number");
+        if (!valueClass.isBlank()) {
+            builder.append(" ").append(valueClass);
+        }
+        builder.append("\">").append(escape(value)).append("</td></tr>");
+    }
+
+    private static void appendLinkList(StringBuilder builder, List<ResultLink> items, String lineSeparator) {
         if (items.isEmpty()) {
             builder.append("- none").append(lineSeparator);
             return;
         }
-        for (String item : items) {
-            builder.append("- ").append(item).append(lineSeparator);
+        for (ResultLink item : items) {
+            builder.append("- ").append(item.label()).append(lineSeparator);
         }
+    }
+
+    private static void appendLinkListHtml(StringBuilder builder, List<ResultLink> items) {
+        if (items.isEmpty()) {
+            builder.append("<p class=\"muted\">none</p>");
+            return;
+        }
+        builder.append("<ul class=\"links\">");
+        for (ResultLink item : items) {
+            builder.append("<li><a href=\"").append(item.path().toUri()).append("\">")
+                    .append(escape(item.label())).append("</a></li>");
+        }
+        builder.append("</ul>");
+    }
+
+    private static String htmlDocument(String body) {
+        return """
+                <html>
+                <head>
+                <style>
+                body { font-family: sans-serif; font-size: 12px; margin: 10px; }
+                h2 { margin: 0 0 8px 0; font-size: 17px; }
+                h3 { margin: 0 0 6px 0; font-size: 13px; }
+                table { border-collapse: collapse; width: 100%; }
+                td { padding: 4px 8px 4px 0; vertical-align: top; }
+                code { font-family: monospace; }
+                .section { border: 1px solid #8a8a8a; padding: 8px; margin: 8px 0; }
+                .meta .label { width: 90px; font-weight: bold; }
+                .metrics td { border-bottom: 1px solid #8a8a8a; }
+                .number { text-align: right; font-weight: bold; width: 80px; }
+                .mismatch { color: #c0392b; }
+                .match { color: #16833a; }
+                .pending { color: #8a6d1d; }
+                .issue { color: #c0392b; }
+                .muted, .empty { color: #777777; }
+                .links { margin: 0; padding-left: 18px; }
+                .links li { margin: 3px 0; }
+                a { color: #2f6feb; text-decoration: none; }
+                </style>
+                </head>
+                <body>
+                """ + body + """
+                </body>
+                </html>
+                """;
+    }
+
+    private static String escape(String value) {
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 
     private static LogicSummary readLogicSummary(Path workDir) {
@@ -97,7 +225,7 @@ final class FmAgentResults {
 
         int match = 0;
         int mismatch = 0;
-        List<String> mismatchExamples = new ArrayList<>();
+        List<ResultLink> mismatchExamples = new ArrayList<>();
         String error = null;
 
         for (Path resultFile : resultFiles) {
@@ -109,7 +237,7 @@ final class FmAgentResults {
                 } else if ("MISMATCH".equals(verdict)) {
                     mismatch++;
                     if (mismatchExamples.size() < 20) {
-                        mismatchExamples.add(relative(logicDir, resultFile));
+                        mismatchExamples.add(new ResultLink(relative(logicDir, resultFile), resultFile));
                     }
                 }
             } catch (IOException exception) {
@@ -145,25 +273,44 @@ final class FmAgentResults {
                     count(summary, "total_confirmed"),
                     count(summary, "total_not_confirmed"),
                     count(summary, "total_error"),
-                    confirmedBugs(summary),
+                    confirmedBugs(summary, workDir),
                     null);
         } catch (IOException exception) {
             return BugSummary.error(exception.getMessage());
         }
     }
 
-    private static List<String> confirmedBugs(String summary) {
-        Matcher idMatcher = BUG_ID_PATTERN.matcher(summary);
-        Matcher statusMatcher = BUG_STATUS_PATTERN.matcher(summary);
-        List<String> confirmed = new ArrayList<>();
-        while (idMatcher.find() && statusMatcher.find()) {
-            String id = idMatcher.group(1);
-            String status = statusMatcher.group(1);
+    private static List<ResultLink> confirmedBugs(String summary, Path workDir) {
+        Matcher objectMatcher = BUG_OBJECT_PATTERN.matcher(summary);
+        List<ResultLink> confirmed = new ArrayList<>();
+        while (objectMatcher.find()) {
+            String object = objectMatcher.group();
+            String id = stringField(object, "id");
+            String status = stringField(object, "confirmation_status");
             if ("confirmed".equalsIgnoreCase(status)) {
-                confirmed.add(id);
+                confirmed.add(new ResultLink(id, bugReportPath(workDir, id, stringField(object, "detail_file"))));
             }
         }
         return confirmed;
+    }
+
+    private static Path bugReportPath(Path workDir, String id, String detailFile) {
+        String fallback = "bug_validation/" + id + ".md";
+        String pathText = detailFile == null || detailFile.isBlank() ? fallback : detailFile;
+        Path path = Path.of(pathText);
+        if (path.isAbsolute()) {
+            return path;
+        }
+        Path targetPath = workDir.getParent();
+        if (targetPath == null) {
+            return workDir.resolve(path).normalize();
+        }
+        return targetPath.resolve(path).normalize();
+    }
+
+    private static String stringField(String json, String key) {
+        Matcher matcher = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
+        return matcher.find() ? matcher.group(1) : "";
     }
 
     private static List<Path> listFiles(Path root, String suffix) {
@@ -206,11 +353,11 @@ final class FmAgentResults {
         private final int match;
         private final int mismatch;
         private final int unverified;
-        private final List<String> mismatchExamples;
+        private final List<ResultLink> mismatchExamples;
         private final String error;
 
         private LogicSummary(int totalFunctions, int resultFiles, int verified, int match, int mismatch,
-                             int unverified, List<String> mismatchExamples, String error) {
+                             int unverified, List<ResultLink> mismatchExamples, String error) {
             this.totalFunctions = totalFunctions;
             this.resultFiles = resultFiles;
             this.verified = verified;
@@ -245,7 +392,7 @@ final class FmAgentResults {
             return unverified;
         }
 
-        private List<String> mismatchExamples() {
+        private List<ResultLink> mismatchExamples() {
             return mismatchExamples;
         }
 
@@ -260,11 +407,11 @@ final class FmAgentResults {
         private final String confirmed;
         private final String notConfirmed;
         private final String errors;
-        private final List<String> confirmedBugs;
+        private final List<ResultLink> confirmedBugs;
         private final String error;
 
         private BugSummary(String json, String reported, String confirmed, String notConfirmed, String errors,
-                           List<String> confirmedBugs, String error) {
+                           List<ResultLink> confirmedBugs, String error) {
             this.json = json;
             this.reported = reported;
             this.confirmed = confirmed;
@@ -302,12 +449,30 @@ final class FmAgentResults {
             return errors;
         }
 
-        private List<String> confirmedBugs() {
+        private List<ResultLink> confirmedBugs() {
             return confirmedBugs;
         }
 
         private String error() {
             return error;
+        }
+    }
+
+    private static final class ResultLink {
+        private final String label;
+        private final Path path;
+
+        private ResultLink(String label, Path path) {
+            this.label = label;
+            this.path = path;
+        }
+
+        private String label() {
+            return label;
+        }
+
+        private Path path() {
+            return path;
         }
     }
 }

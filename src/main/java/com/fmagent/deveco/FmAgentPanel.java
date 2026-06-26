@@ -1,9 +1,12 @@
 package com.fmagent.deveco;
 
 import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -11,6 +14,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
+import javax.swing.JEditorPane;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -18,6 +22,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.event.HyperlinkEvent;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -27,6 +32,8 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,7 +54,7 @@ final class FmAgentPanel extends JPanel {
     private final JCheckBox resume;
     private final JCheckBox isolate;
     private final JTextArea monitorOutput;
-    private final JTextArea resultOutput;
+    private final JEditorPane resultOutput;
     private final JPanel monitorPanel;
     private final JPanel resultPanel;
     private final JButton installButton;
@@ -76,7 +83,7 @@ final class FmAgentPanel extends JPanel {
         resume = new JCheckBox("Resume", true);
         isolate = new JCheckBox("Isolate", false);
         monitorOutput = createOutputArea(ProjectSummary.from(project).asText());
-        resultOutput = createOutputArea("No verification result loaded." + System.lineSeparator());
+        resultOutput = createResultPane();
         monitorPanel = buildMonitorPanel();
         resultPanel = buildVerifyResultPanel();
 
@@ -120,6 +127,19 @@ final class FmAgentPanel extends JPanel {
         area.setLineWrap(false);
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         return area;
+    }
+
+    private JEditorPane createResultPane() {
+        JEditorPane pane = new JEditorPane("text/html", FmAgentResults.emptyHtml());
+        pane.setEditable(false);
+        pane.setOpaque(false);
+        pane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+        pane.addHyperlinkListener(event -> {
+            if (event.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                openResultLink(event);
+            }
+        });
+        return pane;
     }
 
     private JPanel buildMainPanel(PropertiesComponent properties) {
@@ -507,15 +527,41 @@ final class FmAgentPanel extends JPanel {
         append(line + System.lineSeparator());
     }
 
-    private void setResultText(String text) {
+    private void setResultHtml(String html) {
         SwingUtilities.invokeLater(() -> {
-            resultOutput.setText(text);
+            resultOutput.setText(html);
             resultOutput.setCaretPosition(0);
         });
     }
 
     private void updateResultViews(Path targetPath) {
-        setResultText(FmAgentResults.render(targetPath));
+        setResultHtml(FmAgentResults.renderHtml(targetPath));
+    }
+
+    private void openResultLink(HyperlinkEvent event) {
+        Path path = pathFromLink(event);
+        if (path == null) {
+            return;
+        }
+        VirtualFile file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path);
+        if (file == null) {
+            Messages.showWarningDialog(project, "Result file not found: " + path, "FM Agent");
+            return;
+        }
+        FileEditorManager.getInstance(project).openFile(file, true);
+    }
+
+    private Path pathFromLink(HyperlinkEvent event) {
+        try {
+            URI uri = event.getURL() != null ? event.getURL().toURI() : new URI(event.getDescription());
+            if (!"file".equalsIgnoreCase(uri.getScheme())) {
+                return null;
+            }
+            return Path.of(uri).toAbsolutePath().normalize();
+        } catch (IllegalArgumentException | URISyntaxException exception) {
+            Messages.showWarningDialog(project, "Could not open result link: " + event.getDescription(), "FM Agent");
+            return null;
+        }
     }
 
     private void showMonitor() {
