@@ -315,6 +315,9 @@ final class FmAgentPanel extends JPanel {
         if (home == null || projectPath == null) {
             return;
         }
+        if (!ensureGitRepository(projectPath)) {
+            return;
+        }
         lastTargetPath = projectPath;
         runProcess(home, projectPath, "Verifying project",
                 FmAgentCommands.verifyCommand(projectPath, resume.isSelected(), isolate.isSelected(), timeoutSeconds()));
@@ -399,6 +402,80 @@ final class FmAgentPanel extends JPanel {
             return null;
         }
         return Path.of(basePath);
+    }
+
+    private boolean ensureGitRepository(Path targetPath) {
+        GitCommandResult head = runGitCommand(targetPath, "rev-parse", "--verify", "HEAD");
+        if (head.success()) {
+            appendLine("[ok] Target git repository has HEAD: " + head.output().strip());
+            return true;
+        }
+
+        appendLine("[..] Target has no git HEAD; preparing git repository in " + targetPath);
+        if (!Files.exists(targetPath.resolve(".git"))) {
+            GitCommandResult init = runGitCommand(targetPath, "init");
+            appendGitOutput(init);
+            if (!init.success()) {
+                Messages.showWarningDialog(project, "Could not initialize git repository in " + targetPath, "FM Agent");
+                return false;
+            }
+        }
+
+        GitCommandResult add = runGitCommand(targetPath, "add", "-A");
+        appendGitOutput(add);
+        if (!add.success()) {
+            Messages.showWarningDialog(project, "Could not stage project files in " + targetPath, "FM Agent");
+            return false;
+        }
+
+        GitCommandResult commit = runGitCommand(targetPath,
+                "-c", "user.name=FM-Agent",
+                "-c", "user.email=fm-agent@local",
+                "commit", "--allow-empty", "-m", "Initialize repository for FM-Agent");
+        appendGitOutput(commit);
+        if (!commit.success()) {
+            Messages.showWarningDialog(project, "Could not create initial git commit in " + targetPath, "FM Agent");
+            return false;
+        }
+
+        GitCommandResult verifiedHead = runGitCommand(targetPath, "rev-parse", "--verify", "HEAD");
+        appendGitOutput(verifiedHead);
+        if (!verifiedHead.success()) {
+            Messages.showWarningDialog(project, "Git repository was initialized, but HEAD is still unavailable in " + targetPath, "FM Agent");
+            return false;
+        }
+        appendLine("[ok] Target git repository ready: " + verifiedHead.output().strip());
+        return true;
+    }
+
+    private void appendGitOutput(GitCommandResult result) {
+        if (!result.output().isBlank()) {
+            appendLine(result.output().strip());
+        }
+    }
+
+    private GitCommandResult runGitCommand(Path targetPath, String... args) {
+        try {
+            String[] command = new String[args.length + 3];
+            command[0] = "git";
+            command[1] = "-C";
+            command[2] = targetPath.toString();
+            System.arraycopy(args, 0, command, 3, args.length);
+            ProcessBuilder builder = new ProcessBuilder(command);
+            builder.redirectErrorStream(true);
+            Process process = builder.start();
+            String output;
+            try (var reader = process.inputReader(StandardCharsets.UTF_8)) {
+                output = reader.lines().collect(java.util.stream.Collectors.joining(System.lineSeparator()));
+            }
+            int exitCode = process.waitFor();
+            return new GitCommandResult(exitCode, output);
+        } catch (IOException exception) {
+            return new GitCommandResult(-1, exception.getMessage());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return new GitCommandResult(-1, "Interrupted while running git.");
+        }
     }
 
     private void runProcess(Path fmAgentHomePath, Path targetPath, String title, String command) {
@@ -570,5 +647,11 @@ final class FmAgentPanel extends JPanel {
 
     private void showVerifyResult() {
         SwingUtilities.invokeLater(showVerifyResultAction);
+    }
+
+    private record GitCommandResult(int exitCode, String output) {
+        private boolean success() {
+            return exitCode == 0;
+        }
     }
 }

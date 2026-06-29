@@ -7,7 +7,7 @@ DevEco Studio plugin demo for running FM-Agent from inside the IDE.
 - Adds `Tools > FM Agent: Open Panel` to open the `FM Agent` Tool Window.
 - Configures the local `FM-Agent-Internal` path from the IDE.
 - Clones FM-Agent from `https://github.com/fmagent-project/FM-Agent.git` when the configured local path does not exist, then runs `./install.sh` from that path.
-- Initializes a Git repository in the current DevEco project after install when the project has no `.git` entry.
+- Ensures the current DevEco project has a Git repository with an initial commit before verification.
 - Runs `uv run python main.py <project>` against the current DevEco project.
 - Runs an environment self-check for FM-Agent, OpenCode, the configured OpenAI-compatible API, and an OpenCode smoke test.
 - Displays process output, `summary.json` counts, bug report paths, logic verification counts, and the tail of `fm_agent/fm_agent.log`.
