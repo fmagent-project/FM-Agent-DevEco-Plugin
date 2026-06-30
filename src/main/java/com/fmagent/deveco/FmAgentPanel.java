@@ -44,8 +44,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 final class FmAgentPanel extends JPanel {
-    private static final String DEFAULT_FM_AGENT_HOME =
-            "/Users/lianganran/codes/2_SJTU_code/FM-agent/FM-Agent-Internal";
+    private static final String DEFAULT_FM_AGENT_HOME = "~/FM-agent";
     private static final String FM_AGENT_HOME_KEY = "com.fmagent.deveco.fmAgentHome";
 
     private final Project project;
@@ -256,9 +255,9 @@ final class FmAgentPanel extends JPanel {
     }
 
     private void chooseFmAgentHome(PropertiesComponent properties) {
-        JFileChooser chooser = new JFileChooser(fmAgentHome.getText().trim());
+        JFileChooser chooser = new JFileChooser(expandUserHome(fmAgentHome.getText().trim()).toFile());
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        chooser.setDialogTitle("Select FM-Agent-Internal directory");
+        chooser.setDialogTitle("Select FM-Agent directory");
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             String selected = chooser.getSelectedFile().getAbsolutePath();
             fmAgentHome.setText(selected);
@@ -360,7 +359,17 @@ final class FmAgentPanel extends JPanel {
             Messages.showWarningDialog(project, "Set the FM-Agent path first.", "FM Agent");
             return null;
         }
-        return Path.of(path).toAbsolutePath().normalize();
+        return expandUserHome(path).toAbsolutePath().normalize();
+    }
+
+    private Path expandUserHome(String path) {
+        if (path.equals("~")) {
+            return Path.of(System.getProperty("user.home"));
+        }
+        if (path.startsWith("~/")) {
+            return Path.of(System.getProperty("user.home")).resolve(path.substring(2));
+        }
+        return Path.of(path);
     }
 
     private boolean validateExistingFmAgentHome(Path home) {
