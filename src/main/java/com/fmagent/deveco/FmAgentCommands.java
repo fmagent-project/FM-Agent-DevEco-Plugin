@@ -145,18 +145,28 @@ final class FmAgentCommands {
         return command.toString();
     }
 
-    static String verifyCommand(Path targetPath, boolean resume, boolean isolate, String opencodeTimeoutSeconds) {
+    static String reasoningCommand(Path targetPath, ReasoningOptions options, String opencodeTimeoutSeconds) {
         StringBuilder command = new StringBuilder(MAC_PATH_EXPORT);
         appendRuntimeEnvironment(command, opencodeTimeoutSeconds);
         command.append(" && uv run python -u main.py ");
         command.append(shellQuote(targetPath.toString()));
-        if (resume) {
+        if (!options.incremental() && options.resume()) {
             command.append(" --resume");
         }
-        if (isolate) {
+        if (options.isolate()) {
             command.append(" --isolate");
         }
+        if (options.incremental()) {
+            command.append(" --incremental ");
+            command.append(shellQuote(options.incrementalIntentFile().toString()));
+        }
         return command.toString();
+    }
+
+    record ReasoningOptions(boolean resume, boolean isolate, Path incrementalIntentFile) {
+        private boolean incremental() {
+            return incrementalIntentFile != null;
+        }
     }
 
     static String shellQuote(String value) {

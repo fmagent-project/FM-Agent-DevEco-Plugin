@@ -31,7 +31,7 @@ final class FmAgentResults {
     }
 
     static String emptyHtml() {
-        return htmlDocument("<div class=\"empty\">No verification result loaded.</div>");
+        return htmlDocument("<div class=\"empty\">No reasoning result loaded.</div>");
     }
 
     static String renderHtml(Path targetPath) {
@@ -45,24 +45,24 @@ final class FmAgentResults {
         String lineSeparator = System.lineSeparator();
         StringBuilder builder = new StringBuilder();
 
-        builder.append("=== Logic Verification Summary ===").append(lineSeparator);
+        builder.append("=== Logic Reasoning Summary ===").append(lineSeparator);
         builder.append("Refreshed: ").append(LocalDateTime.now().format(REFRESH_TIME_FORMAT)).append(lineSeparator);
         builder.append("Target: ").append(targetPath).append(lineSeparator);
-        builder.append("Logic results: ").append(workDir.resolve("logic_verification_results")).append(lineSeparator);
+        builder.append("Logic reasoning results: ").append(workDir).append(lineSeparator);
         builder.append("Bug results: ").append(workDir.resolve("bug_validation")).append(lineSeparator);
         builder.append(lineSeparator);
 
-        builder.append("=== Spec Logic Verification ===").append(lineSeparator);
+        builder.append("=== Spec Logic Reasoning ===").append(lineSeparator);
         builder.append("Extracted functions: ").append(logicSummary.totalFunctions()).append(lineSeparator);
-        builder.append("Verified functions: ").append(logicSummary.verified()).append(lineSeparator);
+        builder.append("Functions reasoned about: ").append(logicSummary.reasonedFunctions()).append(lineSeparator);
         builder.append("Mismatch: ").append(logicSummary.mismatch()).append(lineSeparator);
         builder.append("Match: ").append(logicSummary.match()).append(lineSeparator);
-        builder.append("Unverified: ").append(logicSummary.unverified()).append(lineSeparator);
+        builder.append("No reasoning result: ").append(logicSummary.notReasonedFunctions()).append(lineSeparator);
 
         if (logicSummary.error() != null) {
             builder.append("Logic result read issue: ").append(logicSummary.error()).append(lineSeparator);
         } else if (logicSummary.resultFiles() == 0) {
-            builder.append("No logic verification result files found yet.").append(lineSeparator);
+            builder.append("No logic reasoning result files found yet.").append(lineSeparator);
         }
         builder.append(lineSeparator);
 
@@ -92,26 +92,26 @@ final class FmAgentResults {
     private static String renderSummaryHtml(Path targetPath, Path workDir, LogicSummary logicSummary, BugSummary bugSummary) {
         String refreshed = LocalDateTime.now().format(REFRESH_TIME_FORMAT);
         StringBuilder builder = new StringBuilder();
-        builder.append("<h2>Logic Verification Summary</h2>");
+        builder.append("<h2>Logic Reasoning Summary</h2>");
         builder.append("<table class=\"meta\">");
         appendRow(builder, "Refreshed", refreshed);
         appendRow(builder, "Target", targetPath.toString());
-        appendRow(builder, "Logic results", workDir.resolve("logic_verification_results").toString());
+        appendRow(builder, "Logic reasoning results", workDir.toString());
         appendRow(builder, "Bug results", workDir.resolve("bug_validation").toString());
         builder.append("</table>");
 
-        builder.append("<div class=\"section\"><h3>Spec Logic Verification</h3>");
+        builder.append("<div class=\"section\"><h3>Spec Logic Reasoning</h3>");
         builder.append("<table class=\"metrics\">");
         appendMetric(builder, "Extracted functions", Integer.toString(logicSummary.totalFunctions()), "");
-        appendMetric(builder, "Verified functions", Integer.toString(logicSummary.verified()), "");
+        appendMetric(builder, "Functions reasoned about", Integer.toString(logicSummary.reasonedFunctions()), "");
         appendMetric(builder, "Mismatch", Integer.toString(logicSummary.mismatch()), "mismatch");
         appendMetric(builder, "Match", Integer.toString(logicSummary.match()), "match");
-        appendMetric(builder, "Unverified", Integer.toString(logicSummary.unverified()), "pending");
+        appendMetric(builder, "No reasoning result", Integer.toString(logicSummary.notReasonedFunctions()), "pending");
         builder.append("</table>");
         if (logicSummary.error() != null) {
             builder.append("<p class=\"issue\">Logic result read issue: ").append(escape(logicSummary.error())).append("</p>");
         } else if (logicSummary.resultFiles() == 0) {
-            builder.append("<p class=\"muted\">No logic verification result files found yet.</p>");
+            builder.append("<p class=\"muted\">No logic reasoning result files found yet.</p>");
         }
         builder.append("</div>");
 
@@ -245,16 +245,16 @@ final class FmAgentResults {
             }
         }
 
-        int verified = match + mismatch;
+        int reasonedFunctions = match + mismatch;
         int totalFunctions = Math.max(extractedFiles.size(), resultFiles.size());
-        int unverified = Math.max(0, totalFunctions - verified);
+        int notReasonedFunctions = Math.max(0, totalFunctions - reasonedFunctions);
         return new LogicSummary(
                 totalFunctions,
                 resultFiles.size(),
-                verified,
+                reasonedFunctions,
                 match,
                 mismatch,
-                unverified,
+                notReasonedFunctions,
                 mismatchExamples,
                 error);
     }
@@ -349,21 +349,21 @@ final class FmAgentResults {
     private static final class LogicSummary {
         private final int totalFunctions;
         private final int resultFiles;
-        private final int verified;
+        private final int reasonedFunctions;
         private final int match;
         private final int mismatch;
-        private final int unverified;
+        private final int notReasonedFunctions;
         private final List<ResultLink> mismatchExamples;
         private final String error;
 
-        private LogicSummary(int totalFunctions, int resultFiles, int verified, int match, int mismatch,
-                             int unverified, List<ResultLink> mismatchExamples, String error) {
+        private LogicSummary(int totalFunctions, int resultFiles, int reasonedFunctions, int match, int mismatch,
+                             int notReasonedFunctions, List<ResultLink> mismatchExamples, String error) {
             this.totalFunctions = totalFunctions;
             this.resultFiles = resultFiles;
-            this.verified = verified;
+            this.reasonedFunctions = reasonedFunctions;
             this.match = match;
             this.mismatch = mismatch;
-            this.unverified = unverified;
+            this.notReasonedFunctions = notReasonedFunctions;
             this.mismatchExamples = mismatchExamples;
             this.error = error;
         }
@@ -376,8 +376,8 @@ final class FmAgentResults {
             return resultFiles;
         }
 
-        private int verified() {
-            return verified;
+        private int reasonedFunctions() {
+            return reasonedFunctions;
         }
 
         private int match() {
@@ -388,8 +388,8 @@ final class FmAgentResults {
             return mismatch;
         }
 
-        private int unverified() {
-            return unverified;
+        private int notReasonedFunctions() {
+            return notReasonedFunctions;
         }
 
         private List<ResultLink> mismatchExamples() {

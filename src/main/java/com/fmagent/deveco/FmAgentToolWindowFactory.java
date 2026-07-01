@@ -18,16 +18,16 @@ public final class FmAgentToolWindowFactory implements ToolWindowFactory, DumbAw
 
         Content mainContent = contentFactory.createContent(panel, "Main", false);
         Content monitorContent = contentFactory.createContent(panel.monitorComponent(), "Monitor", false);
-        Content verifyResultContent = contentFactory.createContent(panel.verifyResultComponent(), "Verify Result", false);
+        Content reasoningResultContent = contentFactory.createContent(panel.reasoningResultComponent(), "Reasoning Result", false);
 
         panel.setNavigationActions(
                 () -> toolWindow.getContentManager().setSelectedContent(monitorContent),
-                () -> toolWindow.getContentManager().setSelectedContent(verifyResultContent));
+                () -> toolWindow.getContentManager().setSelectedContent(reasoningResultContent));
 
         toolWindow.getContentManager().addContentManagerListener(new ContentManagerListener() {
             @Override
             public void selectionChanged(@NotNull ContentManagerEvent event) {
-                if (event.getContent() == verifyResultContent) {
+                if (event.getContent() == reasoningResultContent) {
                     panel.refreshResultsSilently();
                 }
             }
@@ -35,7 +35,7 @@ public final class FmAgentToolWindowFactory implements ToolWindowFactory, DumbAw
 
         toolWindow.getContentManager().addContent(mainContent);
         toolWindow.getContentManager().addContent(monitorContent);
-        toolWindow.getContentManager().addContent(verifyResultContent);
+        toolWindow.getContentManager().addContent(reasoningResultContent);
         toolWindow.getContentManager().setSelectedContent(mainContent);
     }
 }

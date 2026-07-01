@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEVECO_HOME="${DEVECO_HOME:-/Applications/DevEco-Studio.app/Contents}"
 PLUGIN_ID="fm-agent-deveco-plugin"
-PLUGIN_VERSION="0.5.0"
+PLUGIN_VERSION="0.6.0"
 
 if [[ ! -d "$DEVECO_HOME" ]]; then
   echo "DevEco home not found: $DEVECO_HOME" >&2

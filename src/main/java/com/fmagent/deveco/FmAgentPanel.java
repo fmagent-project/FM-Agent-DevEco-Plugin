@@ -17,6 +17,7 @@ import javax.swing.JComponent;
 import javax.swing.JEditorPane;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -38,7 +39,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -46,28 +51,39 @@ import java.util.concurrent.TimeUnit;
 final class FmAgentPanel extends JPanel {
     private static final String DEFAULT_FM_AGENT_HOME = "~/FM-agent";
     private static final String FM_AGENT_HOME_KEY = "com.fmagent.deveco.fmAgentHome";
+    private static final DateTimeFormatter INTENT_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final String[] PROJECT_FILE_PATHSPEC = {
+            ".",
+            ":(exclude)fm_agent",
+            ":(exclude)fm_agent/**",
+            ":(exclude)fm_agent_plugin",
+            ":(exclude)fm_agent_plugin/**"
+    };
 
     private final Project project;
     private final JTextField fmAgentHome;
     private final JTextField opencodeTimeoutSeconds;
     private final JCheckBox resume;
     private final JCheckBox isolate;
+    private final JCheckBox incremental;
     private final JTextArea monitorOutput;
     private final JEditorPane resultOutput;
     private final JPanel monitorPanel;
     private final JPanel resultPanel;
     private final JButton installButton;
     private final JButton checkEnvironmentButton;
-    private final JButton verifyProjectButton;
+    private final JButton reasonAboutProjectButton;
     private final JButton getResultsButton;
     private final JButton stopButton;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     private volatile Process currentProcess;
     private volatile Path lastTargetPath;
+    private String incrementalIntentText = "";
+    private boolean incrementalIntentConfirmed;
     private Runnable showMonitorAction = () -> {
     };
-    private Runnable showVerifyResultAction = () -> {
+    private Runnable showReasoningResultAction = () -> {
     };
 
     FmAgentPanel(Project project) {
@@ -81,14 +97,15 @@ final class FmAgentPanel extends JPanel {
         opencodeTimeoutSeconds = new JTextField(properties.getValue("com.fmagent.deveco.opencodeTimeoutSeconds", "300"), 8);
         resume = new JCheckBox("Resume", true);
         isolate = new JCheckBox("Isolate", false);
+        incremental = new JCheckBox("Incremental", false);
         monitorOutput = createOutputArea(ProjectSummary.from(project).asText());
         resultOutput = createResultPane();
         monitorPanel = buildMonitorPanel();
-        resultPanel = buildVerifyResultPanel();
+        resultPanel = buildReasoningResultPanel();
 
         installButton = new JButton("Install FM-Agent");
         checkEnvironmentButton = new JButton("Check Environment");
-        verifyProjectButton = new JButton("Verify Project");
+        reasonAboutProjectButton = new JButton("Reason About Project");
         getResultsButton = new JButton("Get Results");
         stopButton = new JButton("Stop");
         stopButton.setEnabled(false);
@@ -102,22 +119,23 @@ final class FmAgentPanel extends JPanel {
 
         installButton.addActionListener(event -> installFmAgent());
         checkEnvironmentButton.addActionListener(event -> checkEnvironment());
-        verifyProjectButton.addActionListener(event -> verifyProject());
+        reasonAboutProjectButton.addActionListener(event -> reasonAboutProject());
         getResultsButton.addActionListener(event -> refreshResults());
         stopButton.addActionListener(event -> stopCurrentProcess());
+        incremental.addActionListener(event -> handleIncrementalSelection());
     }
 
     JComponent monitorComponent() {
         return monitorPanel;
     }
 
-    JComponent verifyResultComponent() {
+    JComponent reasoningResultComponent() {
         return resultPanel;
     }
 
-    void setNavigationActions(Runnable showMonitorAction, Runnable showVerifyResultAction) {
+    void setNavigationActions(Runnable showMonitorAction, Runnable showReasoningResultAction) {
         this.showMonitorAction = showMonitorAction;
-        this.showVerifyResultAction = showVerifyResultAction;
+        this.showReasoningResultAction = showReasoningResultAction;
     }
 
     private JTextArea createOutputArea(String initialText) {
@@ -187,7 +205,7 @@ final class FmAgentPanel extends JPanel {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.add(buildInstallGroup());
         panel.add(Box.createVerticalStrut(8));
-        panel.add(buildVerifyGroup());
+        panel.add(buildReasoningGroup());
         panel.add(Box.createVerticalStrut(8));
         panel.add(buildResultsGroup());
         panel.add(Box.createVerticalGlue());
@@ -201,7 +219,7 @@ final class FmAgentPanel extends JPanel {
         return buildActionGroup("1. Install and Environment", row);
     }
 
-    private JPanel buildVerifyGroup() {
+    private JPanel buildReasoningGroup() {
         JPanel content = new JPanel(new GridBagLayout());
         GridBagConstraints constraints = new GridBagConstraints();
         constraints.gridx = 0;
@@ -211,7 +229,7 @@ final class FmAgentPanel extends JPanel {
         constraints.weightx = 1;
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
-        buttons.add(verifyProjectButton);
+        buttons.add(reasonAboutProjectButton);
         buttons.add(stopButton);
         content.add(buttons, constraints);
 
@@ -220,9 +238,10 @@ final class FmAgentPanel extends JPanel {
         options.add(new JLabel("Options"));
         options.add(resume);
         options.add(isolate);
+        options.add(incremental);
         content.add(options, constraints);
 
-        return buildActionGroup("2. Verify Code", content);
+        return buildActionGroup("2. Reason About Code", content);
     }
 
     private JPanel buildResultsGroup() {
@@ -247,11 +266,50 @@ final class FmAgentPanel extends JPanel {
         return panel;
     }
 
-    private JPanel buildVerifyResultPanel() {
+    private JPanel buildReasoningResultPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(new EmptyBorder(12, 12, 12, 12));
         panel.add(new JScrollPane(resultOutput), BorderLayout.CENTER);
         return panel;
+    }
+
+    private void handleIncrementalSelection() {
+        if (incremental.isSelected()) {
+            if (!promptIncrementalIntent()) {
+                incremental.setSelected(false);
+            }
+        }
+        updateReasoningOptionState();
+    }
+
+    private void updateReasoningOptionState() {
+        boolean incrementalMode = incremental.isSelected();
+        if (incrementalMode) {
+            resume.setSelected(false);
+        }
+        resume.setEnabled(!incrementalMode);
+    }
+
+    private boolean promptIncrementalIntent() {
+        JTextArea input = new JTextArea(incrementalIntentText, 8, 48);
+        input.setLineWrap(true);
+        input.setWrapStyleWord(true);
+        JScrollPane scrollPane = new JScrollPane(input);
+        JPanel panel = new JPanel(new BorderLayout(0, 8));
+        panel.add(new JLabel("请输入本次代码修改的意图"), BorderLayout.NORTH);
+        panel.add(scrollPane, BorderLayout.CENTER);
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                panel,
+                "Incremental Intent",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE);
+        if (result != JOptionPane.OK_OPTION) {
+            return false;
+        }
+        incrementalIntentText = input.getText();
+        incrementalIntentConfirmed = true;
+        return true;
     }
 
     private void chooseFmAgentHome(PropertiesComponent properties) {
@@ -308,18 +366,34 @@ final class FmAgentPanel extends JPanel {
                 FmAgentCommands.environmentCheckCommand(projectPath, timeoutSeconds()), false);
     }
 
-    private void verifyProject() {
+    private void reasonAboutProject() {
         Path home = requireFmAgentHome();
         Path projectPath = projectPath();
         if (home == null || projectPath == null) {
             return;
         }
-        if (!ensureGitRepository(projectPath)) {
+        boolean incrementalMode = incremental.isSelected();
+        if (incrementalMode && !incrementalIntentConfirmed && !promptIncrementalIntent()) {
             return;
         }
+        if (!prepareGitBaseline(projectPath, incrementalMode)) {
+            return;
+        }
+        Path incrementalIntentFile = null;
+        if (incrementalMode) {
+            incrementalIntentFile = createIncrementalIntentFile(projectPath, incrementalIntentText);
+            if (incrementalIntentFile == null) {
+                return;
+            }
+            appendLine("[ok] Incremental intent: " + incrementalIntentFile);
+        }
         lastTargetPath = projectPath;
-        runProcess(home, projectPath, "Verifying project",
-                FmAgentCommands.verifyCommand(projectPath, resume.isSelected(), isolate.isSelected(), timeoutSeconds()));
+        FmAgentCommands.ReasoningOptions options = new FmAgentCommands.ReasoningOptions(
+                resume.isSelected(),
+                isolate.isSelected(),
+                incrementalIntentFile);
+        runProcess(home, projectPath, "Reasoning about project",
+                FmAgentCommands.reasoningCommand(projectPath, options, timeoutSeconds()));
     }
 
     private void refreshResults() {
@@ -337,7 +411,7 @@ final class FmAgentPanel extends JPanel {
         }
         updateResultViews(target);
         if (showResult) {
-            showVerifyResult();
+            showReasoningResult();
         }
     }
 
@@ -413,6 +487,16 @@ final class FmAgentPanel extends JPanel {
         return Path.of(basePath);
     }
 
+    private boolean prepareGitBaseline(Path targetPath, boolean incrementalMode) {
+        if (!ensureGitRepository(targetPath)) {
+            return false;
+        }
+        if (!incrementalMode) {
+            return true;
+        }
+        return commitPendingProjectChanges(targetPath);
+    }
+
     private boolean ensureGitRepository(Path targetPath) {
         GitCommandResult head = runGitCommand(targetPath, "rev-parse", "--verify", "HEAD");
         if (head.success()) {
@@ -430,31 +514,226 @@ final class FmAgentPanel extends JPanel {
             }
         }
 
-        GitCommandResult add = runGitCommand(targetPath, "add", "-A");
+        GitCommandResult add = addProjectFiles(targetPath);
         appendGitOutput(add);
         if (!add.success()) {
             Messages.showWarningDialog(project, "Could not stage project files in " + targetPath, "FM Agent");
             return false;
         }
 
-        GitCommandResult commit = runGitCommand(targetPath,
-                "-c", "user.name=FM-Agent",
-                "-c", "user.email=fm-agent@local",
-                "commit", "--allow-empty", "-m", "Initialize repository for FM-Agent");
+        GitCommandResult commit = commitProjectFiles(targetPath, "Initialize repository for FM-Agent", true);
         appendGitOutput(commit);
         if (!commit.success()) {
             Messages.showWarningDialog(project, "Could not create initial git commit in " + targetPath, "FM Agent");
             return false;
         }
 
-        GitCommandResult verifiedHead = runGitCommand(targetPath, "rev-parse", "--verify", "HEAD");
-        appendGitOutput(verifiedHead);
-        if (!verifiedHead.success()) {
+        GitCommandResult resolvedHead = runGitCommand(targetPath, "rev-parse", "--verify", "HEAD");
+        appendGitOutput(resolvedHead);
+        if (!resolvedHead.success()) {
             Messages.showWarningDialog(project, "Git repository was initialized, but HEAD is still unavailable in " + targetPath, "FM Agent");
             return false;
         }
-        appendLine("[ok] Target git repository ready: " + verifiedHead.output().strip());
+        appendLine("[ok] Target git repository ready: " + resolvedHead.output().strip());
         return true;
+    }
+
+    private boolean commitPendingProjectChanges(Path targetPath) {
+        appendLine("[..] Checking for project changes before incremental reasoning");
+        GitCommandResult add = addProjectFiles(targetPath);
+        appendGitOutput(add);
+        if (!add.success()) {
+            Messages.showWarningDialog(project, "Could not stage project changes in " + targetPath, "FM Agent");
+            return false;
+        }
+
+        GitPathsResult stagedPaths = stagedProjectPaths(targetPath);
+        if (!stagedPaths.success()) {
+            appendGitOutput(stagedPaths.commandResult());
+            Messages.showWarningDialog(project, "Could not inspect staged project changes in " + targetPath, "FM Agent");
+            return false;
+        }
+        if (stagedPaths.paths().isEmpty()) {
+            appendLine("[ok] No project changes to commit before incremental reasoning.");
+            return true;
+        }
+
+        GitCommandResult commit = commitProjectFiles(targetPath,
+                "chore: save changes before FM-Agent reasoning",
+                false);
+        appendGitOutput(commit);
+        if (!commit.success()) {
+            Messages.showWarningDialog(project,
+                    "Could not commit project changes before incremental reasoning in " + targetPath,
+                    "FM Agent");
+            return false;
+        }
+        appendLine("[ok] Project changes committed for incremental reasoning.");
+        return true;
+    }
+
+    private GitCommandResult addProjectFiles(Path targetPath) {
+        GitCommandResult changedFiles = runGitCommand(targetPath,
+                withProjectPathspec("ls-files", "-z", "--modified", "--deleted", "--others", "--exclude-standard", "--"));
+        if (!changedFiles.success()) {
+            return changedFiles;
+        }
+
+        List<String> paths = projectPaths(changedFiles.output());
+        if (paths.isEmpty()) {
+            return new GitCommandResult(0, "");
+        }
+
+        String[] command = new String[paths.size() + 4];
+        command[0] = "--literal-pathspecs";
+        command[1] = "add";
+        command[2] = "-A";
+        command[3] = "--";
+        for (int index = 0; index < paths.size(); index++) {
+            command[index + 4] = paths.get(index);
+        }
+        return runGitCommand(targetPath, command);
+    }
+
+    private GitCommandResult commitProjectFiles(Path targetPath, String message, boolean allowEmpty) {
+        GitPathsResult stagedPaths = stagedProjectPaths(targetPath);
+        if (!stagedPaths.success()) {
+            return stagedPaths.commandResult();
+        }
+        if (stagedPaths.paths().isEmpty()) {
+            if (!allowEmpty) {
+                return new GitCommandResult(0, "");
+            }
+            return runGitCommand(targetPath,
+                    "-c", "user.name=FM-Agent",
+                    "-c", "user.email=fm-agent@local",
+                    "commit", "--allow-empty", "--only", "-m", message);
+        }
+
+        return runGitCommand(targetPath, withLiteralPaths(stagedPaths.paths(),
+                "-c", "user.name=FM-Agent",
+                "-c", "user.email=fm-agent@local",
+                "commit", "--only", "-m", message,
+                "--"));
+    }
+
+    private GitPathsResult stagedProjectPaths(Path targetPath) {
+        GitCommandResult result = runGitCommand(targetPath,
+                withProjectPathspec("diff", "--cached", "--name-only", "-z", "--"));
+        if (!result.success()) {
+            return new GitPathsResult(result, List.of());
+        }
+        return new GitPathsResult(result, projectPaths(result.output()));
+    }
+
+    private Path createIncrementalIntentFile(Path targetPath, String intentText) {
+        GitCommandResult head = runGitCommand(targetPath, "rev-parse", "--short", "HEAD");
+        if (!head.success()) {
+            appendGitOutput(head);
+            Messages.showWarningDialog(project, "Could not resolve current commit before incremental reasoning.", "FM Agent");
+            return null;
+        }
+
+        Path fmAgentWorkDir = targetPath.resolve("fm_agent");
+        Path intentDir = fmAgentWorkDir.resolve("incremental_intents");
+        String currentCommit = head.output().strip();
+        String baseCommit = readLastAnalyzedCommit(fmAgentWorkDir.resolve("version.log"));
+        String baseLabel = baseCommit == null ? "full" : safeFilePart(shortCommit(baseCommit));
+        String fileName = "incremental-intent-" + baseLabel + "-to-" + safeFilePart(currentCommit)
+                + "-" + LocalDateTime.now().format(INTENT_TIME_FORMAT) + ".md";
+        Path intentFile = intentDir.resolve(fileName);
+
+        try {
+            Files.createDirectories(intentDir);
+            Files.writeString(intentFile, incrementalIntentContent(baseCommit, currentCommit, intentText),
+                    StandardCharsets.UTF_8);
+            return intentFile.toAbsolutePath().normalize();
+        } catch (IOException exception) {
+            Messages.showWarningDialog(project,
+                    "Could not create incremental intent file: " + intentFile + System.lineSeparator() + exception.getMessage(),
+                    "FM Agent");
+            return null;
+        }
+    }
+
+    private String incrementalIntentContent(String baseCommit, String currentCommit, String intentText) {
+        String lineSeparator = System.lineSeparator();
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Incremental FM-Agent Intent").append(lineSeparator).append(lineSeparator);
+        if (baseCommit == null) {
+            builder.append("Previous FM-Agent commit: none; FM-Agent will fall back to a full run.")
+                    .append(lineSeparator);
+        } else {
+            builder.append("Previous FM-Agent commit: ").append(baseCommit).append(lineSeparator);
+        }
+        builder.append("Current commit: ").append(currentCommit).append(lineSeparator).append(lineSeparator);
+        builder.append("## User intent").append(lineSeparator).append(lineSeparator);
+        if (intentText == null || intentText.isBlank()) {
+            builder.append("No user-provided intent.").append(lineSeparator);
+        } else {
+            builder.append(intentText.strip()).append(lineSeparator);
+        }
+        return builder.toString();
+    }
+
+    private String readLastAnalyzedCommit(Path versionLog) {
+        if (!Files.isRegularFile(versionLog)) {
+            return null;
+        }
+        try {
+            String lastCommit = null;
+            for (String line : Files.readAllLines(versionLog, StandardCharsets.UTF_8)) {
+                if (!line.isBlank()) {
+                    lastCommit = line.strip();
+                }
+            }
+            return lastCommit;
+        } catch (IOException exception) {
+            appendLine("Could not read " + versionLog + ": " + exception.getMessage());
+            return null;
+        }
+    }
+
+    private String shortCommit(String commit) {
+        return commit.length() <= 12 ? commit : commit.substring(0, 12);
+    }
+
+    private String safeFilePart(String value) {
+        return value.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private List<String> projectPaths(String nulSeparatedPaths) {
+        List<String> paths = new ArrayList<>();
+        for (String path : nulSeparatedPaths.split("\u0000")) {
+            if (!path.isBlank() && !isGeneratedReasoningPath(path) && !paths.contains(path)) {
+                paths.add(path);
+            }
+        }
+        return paths;
+    }
+
+    private boolean isGeneratedReasoningPath(String path) {
+        return path.equals("fm_agent")
+                || path.startsWith("fm_agent/")
+                || path.equals("fm_agent_plugin")
+                || path.startsWith("fm_agent_plugin/");
+    }
+
+    private String[] withProjectPathspec(String... args) {
+        String[] command = new String[args.length + PROJECT_FILE_PATHSPEC.length];
+        System.arraycopy(args, 0, command, 0, args.length);
+        System.arraycopy(PROJECT_FILE_PATHSPEC, 0, command, args.length, PROJECT_FILE_PATHSPEC.length);
+        return command;
+    }
+
+    private String[] withLiteralPaths(List<String> paths, String... args) {
+        String[] command = new String[args.length + paths.size() + 1];
+        command[0] = "--literal-pathspecs";
+        System.arraycopy(args, 0, command, 1, args.length);
+        for (int index = 0; index < paths.size(); index++) {
+            command[index + args.length + 1] = paths.get(index);
+        }
+        return command;
     }
 
     private void appendGitOutput(GitCommandResult result) {
@@ -555,7 +834,7 @@ final class FmAgentPanel extends JPanel {
                 setRunning(false);
                 if (updateResultsOnSuccess) {
                     updateResultViews(targetPath);
-                    appendLine("Verify Result refreshed for " + targetPath);
+                    appendLine("Reasoning Result refreshed for " + targetPath);
                 }
             }
         });
@@ -596,7 +875,7 @@ final class FmAgentPanel extends JPanel {
         SwingUtilities.invokeLater(() -> {
             installButton.setEnabled(!running);
             checkEnvironmentButton.setEnabled(!running);
-            verifyProjectButton.setEnabled(!running);
+            reasonAboutProjectButton.setEnabled(!running);
             getResultsButton.setEnabled(true);
             stopButton.setEnabled(running);
         });
@@ -654,13 +933,19 @@ final class FmAgentPanel extends JPanel {
         SwingUtilities.invokeLater(showMonitorAction);
     }
 
-    private void showVerifyResult() {
-        SwingUtilities.invokeLater(showVerifyResultAction);
+    private void showReasoningResult() {
+        SwingUtilities.invokeLater(showReasoningResultAction);
     }
 
     private record GitCommandResult(int exitCode, String output) {
         private boolean success() {
             return exitCode == 0;
+        }
+    }
+
+    private record GitPathsResult(GitCommandResult commandResult, List<String> paths) {
+        private boolean success() {
+            return commandResult.success();
         }
     }
 }
