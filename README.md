@@ -16,6 +16,7 @@ The plugin is currently organized as an IntelliJ Platform plugin. It is compiled
 - Installs FM-Agent.
   - Configures the local `FM-Agent` path from the plugin panel.
   - When the configured path does not exist, clones FM-Agent from `https://github.com/fmagent-project/FM-Agent.git` and runs `./install.sh`.
+  - Writes FM-Agent `.env` settings through `Configure Environment`, including API key, base URL, model, and OpenCode provider.
   - Ensures that the current DevEco project has a Git repository and an initial commit before reasoning.
 - Reasons about code in the current project.
   - Supports FM-Agent's `Resume`, `Isolate`, and `Incremental` reasoning options.
@@ -63,11 +64,12 @@ Before the first run, it is recommended to click `Check Environment`.
 2. Open the plugin through `Tools > FM Agent: Open Panel`, or open the `FM Agent` Tool Window on the right.
 3. Enter the local FM-Agent directory in `FM-Agent path`.
 4. Click `Install FM-Agent`. If the directory does not exist, the plugin first clones FM-Agent and then runs the installation script.
-5. Click `Check Environment` to confirm that local tools, FM-Agent configuration, API access, OpenCode configuration, and the OpenCode smoke test are available.
-6. Optional: enable `Incremental` and enter the intent text when prompted. The plugin creates the intent file automatically.
-7. Click `Reason About Project` to start reasoning about the current project.
-8. View real-time output in the `Monitor` tab, and view the result summary in the `Reasoning Result` tab.
-9. Click `Get Results` to manually refresh the latest reasoning results for the target project.
+5. Click `Configure Environment` to write FM-Agent `.env` values: `LLM_API_KEY`, `LLM_API_BASE_URL`, `LLM_MODEL`, and `OPENCODE_MODEL_PROVIDER`.
+6. Click `Check Environment` to confirm that local tools, FM-Agent configuration, API access, OpenCode configuration, and the OpenCode smoke test are available.
+7. Optional: enable `Incremental` and enter the intent text when prompted. The plugin creates the intent file automatically.
+8. Click `Reason About Project` to start reasoning about the current project.
+9. View real-time output in the `Monitor` tab, and view the result summary in the `Reasoning Result` tab.
+10. Click `Get Results` to manually refresh the latest reasoning results for the target project.
 
 When `Incremental` is enabled, the plugin runs FM-Agent with:
 

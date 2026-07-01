@@ -16,6 +16,7 @@ English version: [README.md](README.md)
 - 安装FM-agent
   - 在插件面板中配置本地 `FM-Agent` 路径。
   - 当配置路径不存在时，从 `https://github.com/fmagent-project/FM-Agent.git` 克隆 FM-Agent，并执行 `./install.sh`。
+  - 通过 `Configure Environment` 写入 FM-Agent `.env` 配置，包括 API key、base URL、model 和 OpenCode provider。
   - 在推理前确保当前 DevEco 工程具备 Git 仓库和初始提交。
 - 对当前项目进行代码推理
   - 支持FM-agent的 `Resume`、`Isolate` 和 `Incremental` 推理选项。
@@ -63,11 +64,12 @@ English version: [README.md](README.md)
 2. 通过 `Tools > FM Agent: Open Panel` 打开插件，或直接打开右侧 `FM Agent` Tool Window。
 3. 在 `FM-Agent path` 中填写本地 FM-Agent 目录。
 4. 点击 `Install FM-Agent`。如果目录不存在，插件会先克隆 FM-Agent，再执行安装脚本。
-5. 点击 `Check Environment`，确认本地工具、FM-Agent 配置、API、OpenCode 配置和 OpenCode smoke test 均可用。
-6. 可选：勾选 `Incremental`，并在弹出的输入框中填写 intent 文本。插件会自动创建 intent 文件。
-7. 点击 `Reason About Project` 开始推理当前工程。
-8. 在 `Monitor` 页查看实时输出；在 `Reasoning Result` 页查看结果汇总。
-9. 点击 `Get Results` 可手动刷新最近一次目标工程的推理结果。
+5. 点击 `Configure Environment` 写入 FM-Agent `.env` 配置：`LLM_API_KEY`、`LLM_API_BASE_URL`、`LLM_MODEL`、`OPENCODE_MODEL_PROVIDER`。
+6. 点击 `Check Environment`，确认本地工具、FM-Agent 配置、API、OpenCode 配置和 OpenCode smoke test 均可用。
+7. 可选：勾选 `Incremental`，并在弹出的输入框中填写 intent 文本。插件会自动创建 intent 文件。
+8. 点击 `Reason About Project` 开始推理当前工程。
+9. 在 `Monitor` 页查看实时输出；在 `Reasoning Result` 页查看结果汇总。
+10. 点击 `Get Results` 可手动刷新最近一次目标工程的推理结果。
 
 勾选 `Incremental` 后，插件会按以下形式运行 FM-Agent：
 

@@ -26,6 +26,7 @@ final class FmAgentEnvironment {
         builder.append("- .env: ").append(envPath).append(lineSeparator);
         try {
             List<String> lines = Files.readAllLines(envPath, StandardCharsets.UTF_8);
+            appendSecretPresence(builder, lines, "LLM_API_KEY");
             appendValue(builder, lines, "OPENCODE_MODEL_PROVIDER");
             appendValue(builder, lines, "LLM_MODEL");
             appendValue(builder, lines, "MODEL_ID");
@@ -45,6 +46,19 @@ final class FmAgentEnvironment {
                 return;
             }
         }
+    }
+
+    private static void appendSecretPresence(StringBuilder builder, List<String> lines, String key) {
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(key + "=")) {
+                builder.append("- ").append(key).append(": ")
+                        .append(stripQuotes(trimmed.substring(key.length() + 1)).isBlank() ? "<missing>" : "<set>")
+                        .append(System.lineSeparator());
+                return;
+            }
+        }
+        builder.append("- ").append(key).append(": <missing>").append(System.lineSeparator());
     }
 
     private static String stripQuotes(String value) {

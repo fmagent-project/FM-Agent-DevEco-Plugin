@@ -19,6 +19,7 @@ import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
@@ -43,7 +44,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -71,6 +74,7 @@ final class FmAgentPanel extends JPanel {
     private final JPanel monitorPanel;
     private final JPanel resultPanel;
     private final JButton installButton;
+    private final JButton configureEnvironmentButton;
     private final JButton checkEnvironmentButton;
     private final JButton reasonAboutProjectButton;
     private final JButton getResultsButton;
@@ -104,6 +108,7 @@ final class FmAgentPanel extends JPanel {
         resultPanel = buildReasoningResultPanel();
 
         installButton = new JButton("Install FM-Agent");
+        configureEnvironmentButton = new JButton("Configure Environment");
         checkEnvironmentButton = new JButton("Check Environment");
         reasonAboutProjectButton = new JButton("Reason About Project");
         getResultsButton = new JButton("Get Results");
@@ -118,6 +123,7 @@ final class FmAgentPanel extends JPanel {
         });
 
         installButton.addActionListener(event -> installFmAgent());
+        configureEnvironmentButton.addActionListener(event -> configureEnvironment());
         checkEnvironmentButton.addActionListener(event -> checkEnvironment());
         reasonAboutProjectButton.addActionListener(event -> reasonAboutProject());
         getResultsButton.addActionListener(event -> refreshResults());
@@ -215,6 +221,7 @@ final class FmAgentPanel extends JPanel {
     private JPanel buildInstallGroup() {
         JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         row.add(installButton);
+        row.add(configureEnvironmentButton);
         row.add(checkEnvironmentButton);
         return buildActionGroup("1. Install and Environment", row);
     }
@@ -353,6 +360,128 @@ final class FmAgentPanel extends JPanel {
 
         runProcess(home, projectPath, workingDirectory, "Installing FM-Agent",
                 FmAgentCommands.installCommand(home, projectPath, cloneRepository), false, false);
+    }
+
+    private void configureEnvironment() {
+        Path home = requireFmAgentHome();
+        if (home == null) {
+            return;
+        }
+        Path envPath = home.resolve(".env");
+        Map<String, String> currentValues;
+        try {
+            currentValues = FmAgentEnvFile.read(envPath);
+        } catch (IOException exception) {
+            Messages.showWarningDialog(project,
+                    "Could not read FM-Agent .env: " + envPath + System.lineSeparator() + exception.getMessage(),
+                    "FM Agent");
+            return;
+        }
+
+        EnvironmentFields fields = environmentFields(currentValues);
+        Map<String, String> updates;
+        while (true) {
+            int result = JOptionPane.showConfirmDialog(
+                    this,
+                    fields.panel(),
+                    "Configure FM-Agent Environment",
+                    JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.PLAIN_MESSAGE);
+            if (result != JOptionPane.OK_OPTION) {
+                return;
+            }
+
+            updates = environmentUpdates(fields);
+            String validationMessage = validateEnvironmentUpdates(updates);
+            if (validationMessage == null) {
+                break;
+            }
+            Messages.showWarningDialog(project, validationMessage, "FM Agent");
+        }
+
+        try {
+            FmAgentEnvFile.write(envPath, updates);
+        } catch (IOException exception) {
+            Messages.showWarningDialog(project,
+                    "Could not write FM-Agent .env: " + envPath + System.lineSeparator() + exception.getMessage(),
+                    "FM Agent");
+            return;
+        }
+
+        appendLine("[ok] FM-Agent .env saved: " + envPath);
+        Messages.showInfoMessage(project, "FM-Agent environment saved to " + envPath, "FM Agent");
+    }
+
+    private EnvironmentFields environmentFields(Map<String, String> values) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.insets = new Insets(0, 0, 8, 8);
+        constraints.anchor = GridBagConstraints.WEST;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+
+        JPasswordField apiKey = new JPasswordField(
+                FmAgentEnvFile.displayValue(values, FmAgentEnvFile.LLM_API_KEY),
+                36);
+        JTextField baseUrl = new JTextField(
+                FmAgentEnvFile.displayValue(values, FmAgentEnvFile.LLM_API_BASE_URL),
+                36);
+        JTextField model = new JTextField(
+                FmAgentEnvFile.displayValue(values, FmAgentEnvFile.LLM_MODEL),
+                36);
+        JTextField provider = new JTextField(
+                FmAgentEnvFile.displayValue(values, FmAgentEnvFile.OPENCODE_MODEL_PROVIDER),
+                36);
+
+        addEnvironmentHint(panel, constraints);
+        addEnvironmentRow(panel, constraints, 1, "LLM_API_KEY", apiKey);
+        addEnvironmentRow(panel, constraints, 2, "LLM_API_BASE_URL", baseUrl);
+        addEnvironmentRow(panel, constraints, 3, "LLM_MODEL", model);
+        addEnvironmentRow(panel, constraints, 4, "OPENCODE_MODEL_PROVIDER", provider);
+
+        return new EnvironmentFields(panel, apiKey, baseUrl, model, provider);
+    }
+
+    private void addEnvironmentHint(JPanel panel, GridBagConstraints constraints) {
+        constraints.gridx = 0;
+        constraints.gridy = 0;
+        constraints.gridwidth = 2;
+        constraints.weightx = 1;
+        JLabel hint = new JLabel("Configure values written to FM-Agent .env.");
+        panel.add(hint, constraints);
+        constraints.gridwidth = 1;
+    }
+
+    private void addEnvironmentRow(JPanel panel, GridBagConstraints constraints, int row, String label, JComponent field) {
+        constraints.gridx = 0;
+        constraints.gridy = row;
+        constraints.weightx = 0;
+        panel.add(new JLabel(label), constraints);
+
+        constraints.gridx = 1;
+        constraints.weightx = 1;
+        panel.add(field, constraints);
+    }
+
+    private Map<String, String> environmentUpdates(EnvironmentFields fields) {
+        Map<String, String> updates = new LinkedHashMap<>();
+        updates.put(FmAgentEnvFile.LLM_API_KEY, new String(fields.apiKey().getPassword()).trim());
+        updates.put(FmAgentEnvFile.LLM_API_BASE_URL, fields.baseUrl().getText().trim());
+        updates.put(FmAgentEnvFile.LLM_MODEL, fields.model().getText().trim());
+        updates.put(FmAgentEnvFile.OPENCODE_MODEL_PROVIDER, fields.provider().getText().trim());
+        return updates;
+    }
+
+    private String validateEnvironmentUpdates(Map<String, String> updates) {
+        List<String> missing = new ArrayList<>();
+        for (Map.Entry<String, String> entry : updates.entrySet()) {
+            if (entry.getValue().isBlank()) {
+                missing.add(entry.getKey());
+            }
+        }
+        if (missing.isEmpty()) {
+            return null;
+        }
+        return "Fill required FM-Agent environment value(s): " + String.join(", ", missing);
     }
 
     private void checkEnvironment() {
@@ -874,6 +1003,7 @@ final class FmAgentPanel extends JPanel {
     private void setRunning(boolean running) {
         SwingUtilities.invokeLater(() -> {
             installButton.setEnabled(!running);
+            configureEnvironmentButton.setEnabled(!running);
             checkEnvironmentButton.setEnabled(!running);
             reasonAboutProjectButton.setEnabled(!running);
             getResultsButton.setEnabled(true);
@@ -947,5 +1077,9 @@ final class FmAgentPanel extends JPanel {
         private boolean success() {
             return commandResult.success();
         }
+    }
+
+    private record EnvironmentFields(JPanel panel, JPasswordField apiKey, JTextField baseUrl, JTextField model,
+                                     JTextField provider) {
     }
 }
